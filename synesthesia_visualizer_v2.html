@@ -1,0 +1,2319 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>Synesthesia Visualizer v2</title>
+<style>
+  :root {
+    --ui-fg: rgba(255, 255, 255, 0.92);
+    --ui-fg-dim: rgba(255, 255, 255, 0.55);
+    --ui-bg: rgba(8, 10, 18, 0.55);
+    --ui-bg-strong: rgba(8, 10, 18, 0.82);
+    --ui-stroke: rgba(255, 255, 255, 0.10);
+    --accent: #8be8ff;
+    --accent-warm: #ffd49a;
+  }
+
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: #03040a;
+    color: var(--ui-fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Helvetica, Arial, sans-serif;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none;
+  }
+
+  #app { position: fixed; inset: 0; }
+  #stage { position: absolute; inset: 0; }
+  canvas { display: block; }
+
+  /* drop overlay */
+  #drop {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    pointer-events: none;
+    transition: background 220ms ease, backdrop-filter 220ms ease, opacity 220ms ease;
+    z-index: 30;
+    opacity: 0;
+  }
+  #drop.show { opacity: 1; }
+  #drop.armed {
+    pointer-events: auto;
+    background: radial-gradient(ellipse at center, rgba(80,160,255,0.18), rgba(0,0,0,0.55));
+    backdrop-filter: blur(6px);
+  }
+  #drop .ring {
+    width: min(62vmin, 520px); height: min(62vmin, 520px);
+    border-radius: 50%;
+    border: 1.5px dashed rgba(180, 220, 255, 0.55);
+    display: flex; align-items: center; justify-content: center;
+    text-align: center;
+    color: rgba(220, 240, 255, 0.92);
+    font-weight: 300; letter-spacing: 0.04em;
+    box-shadow: 0 0 80px rgba(80, 160, 255, 0.18) inset, 0 0 60px rgba(120, 180, 255, 0.10);
+    transform: scale(0.97);
+    transition: transform 220ms ease, border-color 220ms ease;
+  }
+  #drop.armed .ring { transform: scale(1); border-color: rgba(180, 220, 255, 0.95); }
+  #drop .label { font-size: 1.05rem; line-height: 1.5; }
+  #drop .label strong { font-weight: 500; letter-spacing: 0.06em; }
+  #drop .hint { font-size: 0.78rem; opacity: 0.7; margin-top: 8px; }
+
+  /* top-left title */
+  #title {
+    position: absolute; top: 18px; left: 22px; z-index: 20;
+    font-weight: 200; letter-spacing: 0.18em; font-size: 0.78rem;
+    color: var(--ui-fg-dim);
+    text-transform: uppercase;
+    user-select: none;
+    pointer-events: none;
+  }
+  #title b { color: var(--ui-fg); font-weight: 400; letter-spacing: 0.22em; }
+
+  /* transport */
+  #transport {
+    position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%);
+    z-index: 20;
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px;
+    background: var(--ui-bg);
+    border: 1px solid var(--ui-stroke);
+    border-radius: 999px;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 8px 40px rgba(0,0,0,0.35);
+    transition: opacity 220ms ease, transform 220ms ease;
+    opacity: 0; pointer-events: none;
+  }
+  #transport.show { opacity: 1; pointer-events: auto; }
+
+  .btn {
+    appearance: none; border: 1px solid var(--ui-stroke);
+    background: rgba(255,255,255,0.04);
+    color: var(--ui-fg);
+    width: 38px; height: 38px; border-radius: 999px;
+    display: inline-flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: background 160ms ease, transform 120ms ease, border-color 160ms ease;
+  }
+  .btn:hover { background: rgba(255,255,255,0.10); border-color: rgba(255,255,255,0.22); }
+  .btn:active { transform: scale(0.95); }
+  .btn[disabled] { opacity: 0.35; cursor: default; }
+  .btn svg { width: 16px; height: 16px; fill: currentColor; }
+
+  #seek {
+    -webkit-appearance: none; appearance: none;
+    width: 240px; height: 4px; border-radius: 999px;
+    background: linear-gradient(90deg, var(--accent) 0%, var(--accent) var(--seek, 0%), rgba(255,255,255,0.16) var(--seek, 0%));
+    outline: none; cursor: pointer;
+  }
+  #seek::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 12px; height: 12px; border-radius: 50%;
+    background: #fff; box-shadow: 0 0 8px var(--accent);
+    cursor: pointer;
+  }
+  #seek::-moz-range-thumb {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: #fff; border: 0; box-shadow: 0 0 8px var(--accent);
+    cursor: pointer;
+  }
+
+  #time {
+    font-variant-numeric: tabular-nums;
+    font-size: 0.78rem; color: var(--ui-fg-dim);
+    min-width: 86px; text-align: center;
+    letter-spacing: 0.06em;
+  }
+
+  /* track legend */
+  #legend {
+    position: absolute; top: 18px; right: 22px; z-index: 20;
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 12px 14px;
+    background: var(--ui-bg);
+    border: 1px solid var(--ui-stroke);
+    border-radius: 14px;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    font-size: 0.72rem; letter-spacing: 0.04em;
+    transition: opacity 220ms ease;
+    opacity: 0; pointer-events: none;
+    user-select: none;
+  }
+  #legend.show { opacity: 0.92; }
+  .legend-row { display: flex; align-items: center; gap: 8px; }
+  .legend-dot { width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 8px currentColor; }
+  .legend-name { color: var(--ui-fg); }
+  .legend-meta { color: var(--ui-fg-dim); margin-left: auto; font-variant-numeric: tabular-nums; }
+
+  /* hint */
+  #hint {
+    position: absolute; bottom: 22px; left: 22px; z-index: 20;
+    font-size: 0.7rem; letter-spacing: 0.06em; color: var(--ui-fg-dim);
+    user-select: none; pointer-events: none;
+    transition: opacity 200ms ease;
+  }
+  #hint b { color: var(--ui-fg); font-weight: 500; }
+
+  /* error toast */
+  #toast {
+    position: absolute; left: 50%; top: 60px; transform: translateX(-50%);
+    z-index: 40;
+    padding: 10px 16px; border-radius: 999px;
+    background: rgba(60, 10, 20, 0.85); color: #ffe6ea;
+    border: 1px solid rgba(255,80,120,0.35);
+    font-size: 0.8rem; letter-spacing: 0.04em;
+    opacity: 0; pointer-events: none;
+    transition: opacity 240ms ease, transform 240ms ease;
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 6px); }
+
+  @media (max-width: 520px) {
+    #legend { display: none; }
+    #seek { width: 140px; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage"></div>
+
+  <div id="title"><b>SYNESTHESIA</b> &nbsp;v2</div>
+
+  <div id="legend" aria-hidden="true">
+    <div class="legend-row"><span class="legend-dot" style="color:#ff2c44;background:#ff2c44"></span><span class="legend-name">Drums</span><span class="legend-meta" data-track="drums">—</span></div>
+    <div class="legend-row"><span class="legend-dot" style="color:#5a3cff;background:#5a3cff"></span><span class="legend-name">Bass</span><span class="legend-meta" data-track="bass">—</span></div>
+    <div class="legend-row"><span class="legend-dot" style="color:#ffc94a;background:#ffc94a"></span><span class="legend-name">Melody</span><span class="legend-meta" data-track="melody">—</span></div>
+    <div class="legend-row"><span class="legend-dot" style="color:#3ce0c8;background:#3ce0c8"></span><span class="legend-name">Pads</span><span class="legend-meta" data-track="pads">—</span></div>
+    <div class="legend-row"><span class="legend-dot" style="color:#ffffff;background:#ffffff"></span><span class="legend-name">Lead</span><span class="legend-meta" data-track="lead">—</span></div>
+  </div>
+
+  <div id="transport" role="group" aria-label="Transport">
+    <button class="btn" id="btn-play" title="Play / Pause">
+      <svg viewBox="0 0 16 16" id="ic-play"><path d="M4 3l9 5-9 5V3z"/></svg>
+    </button>
+    <button class="btn" id="btn-stop" title="Stop">
+      <svg viewBox="0 0 16 16"><rect x="3.5" y="3.5" width="9" height="9" rx="1.2"/></svg>
+    </button>
+    <input type="range" id="seek" min="0" max="1000" value="0" step="1" />
+    <span id="time">0:00 / 0:00</span>
+  </div>
+
+  <div id="hint"><b>Drop a .mid file</b> anywhere · or press <b>O</b> to open</div>
+
+  <div id="drop">
+    <div class="ring">
+      <div>
+        <div class="label"><strong>DROP MIDI</strong></div>
+        <div class="hint">.mid · drag-and-drop or click</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+  <input id="filepicker" type="file" accept=".mid,.midi,audio/midi" style="display:none" />
+</div>
+
+<!-- Tone.js is shipped as a UMD bundle — load it as a global before the module script -->
+<script src="https://cdn.jsdelivr.net/npm/tone@14.8.49/build/Tone.js"></script>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.1/examples/jsm/",
+    "@tonejs/midi": "https://cdn.jsdelivr.net/npm/@tonejs/midi@2.0.28/+esm"
+  }
+}
+</script>
+
+<script type="module">
+// ============================================================================
+// SYNESTHESIA VISUALIZER v2 — entry
+// Sections are wired in order:
+//   1. imports + constants
+//   2. scene foundation (renderer, composer, fog, stars, camera drift)
+//   3. instrument visual classes (drums, bass, melody, pads, lead)
+//   4. MIDI loading + Tone.js scheduling
+//   5. UI binding + animation loop
+// ============================================================================
+
+// ---------- 1. imports + constants ----------------------------------------
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass }    from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass }    from 'three/addons/postprocessing/ShaderPass.js';
+import { FXAAShader }    from 'three/addons/shaders/FXAAShader.js';
+import { Midi }          from '@tonejs/midi';
+// Tone.js is loaded as a UMD global via a regular <script> tag above.
+const Tone = window.Tone;
+if (!Tone) {
+  console.error('Tone.js failed to load.');
+  document.getElementById('toast').textContent = 'Tone.js failed to load — check your network';
+  document.getElementById('toast').classList.add('show');
+}
+
+// fixed 3D positions for each instrument (anchor of its visual group)
+const POSITIONS = {
+  drums:  new THREE.Vector3(  0.0,  0.0,   0.0 ),  // dead center
+  bass:   new THREE.Vector3(  0.0, -3.4,   3.5 ),  // low + forward
+  melody: new THREE.Vector3(  6.5,  4.2,  -1.5 ),  // upper right
+  pads:   new THREE.Vector3(  0.0,  0.4,  -9.5 ),  // background
+  lead:   new THREE.Vector3(  0.0,  0.8,   5.5 ),  // front center
+};
+
+// signature colors per instrument (with secondary tones for variety)
+const COLORS = {
+  kick:    new THREE.Color('#ff1f3a'),
+  snare:   new THREE.Color('#22f2ff'),
+  hat:     new THREE.Color('#fff2b8'),
+  bassA:   new THREE.Color('#3a1cff'),
+  bassB:   new THREE.Color('#7a2bff'),
+  melodyA: new THREE.Color('#ffcc4a'),
+  melodyB: new THREE.Color('#ff8a1a'),
+  padA:    new THREE.Color('#1eecd0'),
+  padB:    new THREE.Color('#7d3cff'),
+  leadA:   new THREE.Color('#ffffff'),
+  leadB:   new THREE.Color('#ffe089'),
+};
+
+// per-track MIDI channel hints (1-based to mirror the v1 mapping)
+const CHANNEL_HINT = { drums: 10, bass: 1, melody: 2, pads: 3, lead: 4 };
+
+// drum note ranges (General MIDI percussion on channel 10)
+const GM_KICK = new Set([35, 36]);
+const GM_SNARE = new Set([38, 40]);
+const GM_HAT   = new Set([42, 44, 46, 49, 51, 53, 57, 59]);
+
+// shared shader chunks
+const GLSL_NOISE = /* glsl */`
+// classic 3d simplex noise — Ashima / Stefan Gustavson, public domain
+vec3 mod289(vec3 x){return x-floor(x*(1.0/289.0))*289.0;}
+vec4 mod289(vec4 x){return x-floor(x*(1.0/289.0))*289.0;}
+vec4 permute(vec4 x){return mod289(((x*34.0)+1.0)*x);}
+vec4 taylorInvSqrt(vec4 r){return 1.79284291400159-0.85373472095314*r;}
+float snoise(vec3 v){
+  const vec2 C=vec2(1.0/6.0,1.0/3.0);
+  const vec4 D=vec4(0.0,0.5,1.0,2.0);
+  vec3 i=floor(v+dot(v,C.yyy));
+  vec3 x0=v-i+dot(i,C.xxx);
+  vec3 g=step(x0.yzx,x0.xyz);
+  vec3 l=1.0-g;
+  vec3 i1=min(g.xyz,l.zxy);
+  vec3 i2=max(g.xyz,l.zxy);
+  vec3 x1=x0-i1+C.xxx;
+  vec3 x2=x0-i2+C.yyy;
+  vec3 x3=x0-D.yyy;
+  i=mod289(i);
+  vec4 p=permute(permute(permute(
+    i.z+vec4(0.0,i1.z,i2.z,1.0))
+    +i.y+vec4(0.0,i1.y,i2.y,1.0))
+    +i.x+vec4(0.0,i1.x,i2.x,1.0));
+  float n_=0.142857142857;
+  vec3 ns=n_*D.wyz-D.xzx;
+  vec4 j=p-49.0*floor(p*ns.z*ns.z);
+  vec4 x_=floor(j*ns.z);
+  vec4 y_=floor(j-7.0*x_);
+  vec4 x=x_*ns.x+ns.yyyy;
+  vec4 y=y_*ns.x+ns.yyyy;
+  vec4 h=1.0-abs(x)-abs(y);
+  vec4 b0=vec4(x.xy,y.xy);
+  vec4 b1=vec4(x.zw,y.zw);
+  vec4 s0=floor(b0)*2.0+1.0;
+  vec4 s1=floor(b1)*2.0+1.0;
+  vec4 sh=-step(h,vec4(0.0));
+  vec4 a0=b0.xzyw+s0.xzyw*sh.xxyy;
+  vec4 a1=b1.xzyw+s1.xzyw*sh.zzww;
+  vec3 p0=vec3(a0.xy,h.x);
+  vec3 p1=vec3(a0.zw,h.y);
+  vec3 p2=vec3(a1.xy,h.z);
+  vec3 p3=vec3(a1.zw,h.w);
+  vec4 norm=taylorInvSqrt(vec4(dot(p0,p0),dot(p1,p1),dot(p2,p2),dot(p3,p3)));
+  p0*=norm.x;p1*=norm.y;p2*=norm.z;p3*=norm.w;
+  vec4 m=max(0.6-vec4(dot(x0,x0),dot(x1,x1),dot(x2,x2),dot(x3,x3)),0.0);
+  m=m*m;
+  return 42.0*dot(m*m,vec4(dot(p0,x0),dot(p1,x1),dot(p2,x2),dot(p3,x3)));
+}
+`;
+
+// utility: smooth easing
+const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
+const easeInOutSine = t => -(Math.cos(Math.PI * t) - 1) / 2;
+const clamp01 = x => Math.max(0, Math.min(1, x));
+const lerp = (a, b, t) => a + (b - a) * t;
+
+// ---------- 2. scene foundation -------------------------------------------
+const stage = document.getElementById('stage');
+
+const renderer = new THREE.WebGLRenderer({
+  antialias: true,
+  alpha: false,
+  powerPreference: 'high-performance',
+  stencil: false,
+});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.setClearColor(0x03040a, 1.0);
+stage.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+// deep fog so far things bleed into the void; tuned to feel atmospheric
+scene.fog = new THREE.FogExp2(0x05060f, 0.038);
+
+const camera = new THREE.PerspectiveCamera(
+  46, window.innerWidth / window.innerHeight, 0.05, 200
+);
+camera.position.set(0.6, 2.6, 14.5);
+camera.lookAt(0, 0.4, 0);
+
+// soft ambient + a single low-key fill so unlit shaders still read in space
+scene.add(new THREE.AmbientLight(0x556699, 0.18));
+const fill = new THREE.DirectionalLight(0xaad0ff, 0.25);
+fill.position.set(4, 6, 8);
+scene.add(fill);
+
+// star field — instanced points with a soft circular sprite, subtle parallax
+const starField = (() => {
+  const COUNT = 2400;
+  const geo = new THREE.BufferGeometry();
+  const positions = new Float32Array(COUNT * 3);
+  const sizes = new Float32Array(COUNT);
+  const tints = new Float32Array(COUNT * 3);
+  const phase = new Float32Array(COUNT);
+  for (let i = 0; i < COUNT; i++) {
+    // distribute in a thick spherical shell around the viewer
+    const r = 60 + Math.random() * 90;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    positions[i*3+0] = r * Math.sin(phi) * Math.cos(theta);
+    positions[i*3+1] = r * Math.sin(phi) * Math.sin(theta) * 0.55; // flatten a bit
+    positions[i*3+2] = r * Math.cos(phi);
+    sizes[i] = Math.pow(Math.random(), 2.2) * 1.6 + 0.25;
+    // pale blue/white with rare warm stars
+    const warm = Math.random() < 0.08;
+    const c = warm
+      ? new THREE.Color().setHSL(0.08 + Math.random()*0.04, 0.6, 0.7)
+      : new THREE.Color().setHSL(0.58 + Math.random()*0.08, 0.25, 0.85);
+    tints[i*3+0] = c.r; tints[i*3+1] = c.g; tints[i*3+2] = c.b;
+    phase[i] = Math.random() * Math.PI * 2;
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute('aSize',    new THREE.BufferAttribute(sizes, 1));
+  geo.setAttribute('aTint',    new THREE.BufferAttribute(tints, 3));
+  geo.setAttribute('aPhase',   new THREE.BufferAttribute(phase, 1));
+
+  const mat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    uniforms: {
+      uTime: { value: 0 },
+      uPixelRatio: { value: renderer.getPixelRatio() },
+    },
+    vertexShader: /* glsl */`
+      attribute float aSize;
+      attribute vec3  aTint;
+      attribute float aPhase;
+      uniform float uTime;
+      uniform float uPixelRatio;
+      varying vec3  vTint;
+      varying float vTwinkle;
+      void main() {
+        vTint = aTint;
+        // gentle per-star twinkle
+        float t = uTime * 0.6 + aPhase;
+        vTwinkle = 0.65 + 0.35 * sin(t) * sin(t * 0.41 + aPhase);
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        gl_Position = projectionMatrix * mv;
+        // size attenuated by depth
+        gl_PointSize = aSize * uPixelRatio * 90.0 / -mv.z;
+      }
+    `,
+    fragmentShader: /* glsl */`
+      varying vec3  vTint;
+      varying float vTwinkle;
+      void main() {
+        vec2 uv = gl_PointCoord - 0.5;
+        float d = length(uv);
+        // soft round sprite with slight halo
+        float core = smoothstep(0.5, 0.0, d);
+        float halo = smoothstep(0.5, 0.18, d) * 0.55;
+        float a = (core + halo) * vTwinkle;
+        vec3 col = vTint * (0.6 + 0.4 * vTwinkle);
+        gl_FragColor = vec4(col * a, a);
+      }
+    `,
+  });
+  const points = new THREE.Points(geo, mat);
+  points.frustumCulled = false;
+  points.renderOrder = -10;
+  scene.add(points);
+  return { points, mat };
+})();
+
+// post-processing — bloom is the soul of this look
+const composer = new EffectComposer(renderer);
+composer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+composer.setSize(window.innerWidth, window.innerHeight);
+const renderPass = new RenderPass(scene, camera);
+composer.addPass(renderPass);
+
+const bloom = new UnrealBloomPass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  1.10,   // strength (idle) — breathes up to ~1.55 on big moments via the loop
+  0.95,   // radius
+  0.22    // threshold — tight enough that only bright cores bloom hard
+);
+composer.addPass(bloom);
+
+// FXAA for clean edges after bloom
+const fxaa = new ShaderPass(FXAAShader);
+const setFxaa = () => {
+  const pr = renderer.getPixelRatio();
+  fxaa.material.uniforms['resolution'].value.set(
+    1 / (window.innerWidth * pr),
+    1 / (window.innerHeight * pr)
+  );
+};
+setFxaa();
+composer.addPass(fxaa);
+
+// camera drift — a slow Lissajous-like wander around a look-at target
+const cameraDrift = (() => {
+  const home = camera.position.clone();
+  const target = new THREE.Vector3(0, 0.6, 0);
+  return {
+    home, target,
+    update(t, energy) {
+      // breathe in slightly when energy rises
+      const zoom = 1.0 - 0.06 * energy;
+      const x = home.x + Math.sin(t * 0.07) * 0.55 + Math.sin(t * 0.31) * 0.10;
+      const y = home.y + Math.sin(t * 0.05 + 1.2) * 0.30;
+      const z = home.z * zoom + Math.cos(t * 0.06) * 0.40;
+      camera.position.lerp(new THREE.Vector3(x, y, z), 0.045);
+      camera.lookAt(target);
+    }
+  };
+})();
+
+// resize handling
+function onResize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+  composer.setSize(w, h);
+  bloom.setSize(w, h);
+  setFxaa();
+  starField.mat.uniforms.uPixelRatio.value = renderer.getPixelRatio();
+}
+window.addEventListener('resize', onResize);
+
+// ---------- 3. instrument visual classes ----------------------------------
+
+// shared activity envelope — fast attack, slow release; smoothed each frame
+class Envelope {
+  constructor(rise = 0.04, fall = 0.55) { this.r = rise; this.f = fall; this.v = 0; this.target = 0; }
+  trigger(amount) { this.target = Math.max(this.target, amount); }
+  set(amount)     { this.target = amount; }
+  update(dt) {
+    const k = (this.target > this.v) ? (1 - Math.exp(-dt / this.r)) : (1 - Math.exp(-dt / this.f));
+    this.v += (this.target - this.v) * k;
+    this.target *= Math.exp(-dt / this.f); // bleed toward 0 between hits
+    return this.v;
+  }
+}
+
+// ---- DRUMS ---------------------------------------------------------------
+// kick: deep red expanding pressure wave (additive sphere shell + flash)
+// snare: cyan shockwave ring (thin torus that explodes outward and fades)
+// hat: bright spark scatter (instanced points spawned per hit)
+class DrumsVisual {
+  constructor() {
+    this.group = new THREE.Group();
+    this.group.position.copy(POSITIONS.drums);
+    this.envKick = new Envelope(0.015, 0.55);
+    this.envSnare = new Envelope(0.012, 0.50);
+    this.envHat   = new Envelope(0.010, 0.25);
+
+    // ---- kick: layered pressure waves (pool of 6 shells)
+    this.kickPool = [];
+    for (let i = 0; i < 6; i++) {
+      const geo = new THREE.SphereGeometry(1, 64, 48);
+      const mat = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        uniforms: {
+          uTime: { value: 0 },
+          uLife: { value: 0 },     // 0..1, 0 = just born, 1 = dead
+          uIntensity: { value: 0 },
+          uColorA: { value: COLORS.kick.clone() },
+          uColorB: { value: new THREE.Color('#ff6a3a') },
+        },
+        vertexShader: /* glsl */`
+          uniform float uTime; uniform float uLife;
+          varying vec3 vN; varying float vRim; varying vec3 vWorld;
+          ${GLSL_NOISE}
+          void main() {
+            vN = normal;
+            // gentle ripple on the surface so the wave feels organic
+            float n = snoise(normal * 2.4 + vec3(uTime * 0.6, 0.0, 0.0));
+            vec3 p = position * (1.0 + n * 0.06);
+            vec4 mv = modelViewMatrix * vec4(p, 1.0);
+            vWorld = (modelMatrix * vec4(p, 1.0)).xyz;
+            vRim = 1.0 - max(0.0, dot(normalize(-mv.xyz), normalize(normalMatrix * normal)));
+            gl_Position = projectionMatrix * mv;
+          }
+        `,
+        fragmentShader: /* glsl */`
+          uniform float uLife; uniform float uIntensity;
+          uniform vec3 uColorA; uniform vec3 uColorB;
+          varying float vRim; varying vec3 vN;
+          void main() {
+            // bright thin shell that fades as the wave expands
+            float shell = pow(vRim, 2.4);
+            float fade = 1.0 - uLife;
+            vec3 col = mix(uColorA, uColorB, vRim) * (1.0 + uIntensity * 1.6);
+            float a = shell * fade * (0.55 + 0.45 * uIntensity);
+            // soft inner glow at birth
+            a += pow(1.0 - uLife, 6.0) * 0.18;
+            gl_FragColor = vec4(col * a * 1.4, a);
+          }
+        `,
+      });
+      const m = new THREE.Mesh(geo, mat);
+      m.visible = false;
+      m.userData = { life: 1, intensity: 0, scaleStart: 0.4, scaleEnd: 6.5 };
+      this.group.add(m);
+      this.kickPool.push(m);
+    }
+    this.kickIdx = 0;
+
+    // ---- kick: central bloom flash (a small additive sprite-disc that pulses)
+    {
+      const geo = new THREE.PlaneGeometry(3.2, 3.2);
+      const mat = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        uniforms: { uIntensity: { value: 0 }, uColor: { value: COLORS.kick.clone() } },
+        vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+        fragmentShader: /* glsl */`
+          uniform float uIntensity; uniform vec3 uColor; varying vec2 vUv;
+          void main() {
+            vec2 uv = vUv - 0.5;
+            float d = length(uv) * 2.0;
+            float core = exp(-d * 4.5) * 1.4;
+            float glow = exp(-d * 1.3) * 0.5;
+            float a = (core + glow) * uIntensity;
+            gl_FragColor = vec4(uColor * a * 1.6, a);
+          }
+        `,
+      });
+      this.kickFlash = new THREE.Mesh(geo, mat);
+      this.kickFlash.userData = { mat };
+      this.group.add(this.kickFlash);
+    }
+
+    // ---- snare: pool of expanding shockwave rings (thin tori)
+    this.snarePool = [];
+    for (let i = 0; i < 5; i++) {
+      const geo = new THREE.TorusGeometry(1, 0.012, 16, 220);
+      const mat = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        uniforms: {
+          uLife: { value: 1 }, uIntensity: { value: 0 },
+          uColor: { value: COLORS.snare.clone() },
+          uTime: { value: 0 },
+        },
+        vertexShader: /* glsl */`
+          uniform float uTime;
+          varying vec2 vUv; varying float vAng;
+          void main() {
+            vUv = uv;
+            vAng = atan(position.y, position.x);
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: /* glsl */`
+          uniform float uLife; uniform float uIntensity; uniform vec3 uColor; uniform float uTime;
+          varying float vAng;
+          void main() {
+            float fade = pow(1.0 - uLife, 1.4);
+            // thin azimuthal sparkle so the ring feels alive
+            float sp = 0.5 + 0.5 * sin(vAng * 18.0 + uTime * 4.0);
+            float a = fade * (0.7 + 0.3 * sp) * (0.6 + 0.6 * uIntensity);
+            vec3 col = uColor * (1.5 + uIntensity * 1.5);
+            gl_FragColor = vec4(col * a, a);
+          }
+        `,
+      });
+      const m = new THREE.Mesh(geo, mat);
+      // start tilted in the XZ plane so ring radiates horizontally
+      m.rotation.x = Math.PI * 0.5;
+      m.visible = false;
+      m.userData = { life: 1, intensity: 0, scaleStart: 0.2, scaleEnd: 5.6, axisJitter: 0 };
+      this.group.add(m);
+      this.snarePool.push(m);
+    }
+    this.snareIdx = 0;
+
+    // ---- hi-hat: spark scatter (one Points cloud, particles cycled in a pool)
+    this.HAT_MAX = 600;
+    {
+      const geo = new THREE.BufferGeometry();
+      this.hatPos = new Float32Array(this.HAT_MAX * 3);
+      this.hatVel = new Float32Array(this.HAT_MAX * 3);
+      this.hatLife = new Float32Array(this.HAT_MAX);   // remaining life seconds
+      this.hatTotal = new Float32Array(this.HAT_MAX);  // total life
+      this.hatSize = new Float32Array(this.HAT_MAX);
+      this.hatTint = new Float32Array(this.HAT_MAX * 3);
+      // park them at far-away points until used
+      for (let i = 0; i < this.HAT_MAX; i++) {
+        this.hatPos[i*3+0] = 9999; this.hatPos[i*3+1] = 9999; this.hatPos[i*3+2] = 9999;
+        this.hatLife[i] = 0; this.hatTotal[i] = 1;
+        this.hatSize[i] = 0;
+        this.hatTint[i*3+0] = 1; this.hatTint[i*3+1] = 0.95; this.hatTint[i*3+2] = 0.7;
+      }
+      geo.setAttribute('position', new THREE.BufferAttribute(this.hatPos, 3));
+      geo.setAttribute('aLife',    new THREE.BufferAttribute(this.hatLife, 1));
+      geo.setAttribute('aTotal',   new THREE.BufferAttribute(this.hatTotal, 1));
+      geo.setAttribute('aSize',    new THREE.BufferAttribute(this.hatSize, 1));
+      geo.setAttribute('aTint',    new THREE.BufferAttribute(this.hatTint, 3));
+      const mat = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        uniforms: { uPixelRatio: { value: renderer.getPixelRatio() } },
+        vertexShader: /* glsl */`
+          attribute float aLife; attribute float aTotal; attribute float aSize; attribute vec3 aTint;
+          uniform float uPixelRatio;
+          varying float vLife; varying vec3 vTint;
+          void main() {
+            float t = clamp(aLife / max(aTotal, 0.0001), 0.0, 1.0);
+            vLife = t; vTint = aTint;
+            vec4 mv = modelViewMatrix * vec4(position, 1.0);
+            gl_Position = projectionMatrix * mv;
+            gl_PointSize = aSize * uPixelRatio * (60.0 / -mv.z) * (0.4 + t);
+          }
+        `,
+        fragmentShader: /* glsl */`
+          varying float vLife; varying vec3 vTint;
+          void main() {
+            vec2 uv = gl_PointCoord - 0.5;
+            float d = length(uv);
+            float core = smoothstep(0.5, 0.0, d);
+            float halo = smoothstep(0.5, 0.15, d) * 0.55;
+            float a = (core + halo) * vLife;
+            gl_FragColor = vec4(vTint * a * 1.6, a);
+          }
+        `,
+      });
+      this.hatPoints = new THREE.Points(geo, mat);
+      this.hatPoints.frustumCulled = false;
+      this.group.add(this.hatPoints);
+      this.hatCursor = 0;
+    }
+
+    // floor "stage" — a faint disc so drums feel grounded (very subtle)
+    {
+      const geo = new THREE.CircleGeometry(7.5, 96);
+      const mat = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        uniforms: { uTime: { value: 0 }, uEnergy: { value: 0 } },
+        vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+        fragmentShader: /* glsl */`
+          uniform float uTime; uniform float uEnergy; varying vec2 vUv;
+          void main() {
+            vec2 p = vUv - 0.5;
+            float r = length(p) * 2.0;
+            float ring = smoothstep(1.0, 0.6, r) * smoothstep(0.0, 0.05, r);
+            float pulse = 0.4 + 0.6 * (0.5 + 0.5 * sin(uTime * 2.0));
+            // a faint always-on glow plus an energy-driven pulse
+            vec3 col = mix(vec3(0.10,0.14,0.30), vec3(0.55,0.70,1.0), 0.4 + 0.4 * uEnergy);
+            float idle = ring * 0.07 * (0.7 + 0.3 * sin(uTime * 0.6));
+            float hit  = ring * (0.32 * uEnergy * pulse);
+            float a = idle + hit;
+            gl_FragColor = vec4(col * a * 1.4, a);
+          }
+        `,
+      });
+      this.floor = new THREE.Mesh(geo, mat);
+      this.floor.rotation.x = -Math.PI * 0.5;
+      this.floor.position.y = -3.0;
+      this.group.add(this.floor);
+    }
+  }
+
+  triggerKick(velocity) {
+    const m = this.kickPool[this.kickIdx];
+    this.kickIdx = (this.kickIdx + 1) % this.kickPool.length;
+    m.visible = true;
+    m.userData.life = 0;
+    m.userData.intensity = 0.6 + velocity * 0.6;
+    m.userData.duration = 1.4 + velocity * 0.5;
+    m.userData.t0 = performance.now() * 0.001;
+    m.scale.setScalar(m.userData.scaleStart);
+    this.envKick.trigger(0.7 + velocity * 0.7);
+  }
+
+  triggerSnare(velocity) {
+    // fire 3 rings on slightly different axes for shockwave depth
+    const N = 3;
+    for (let k = 0; k < N; k++) {
+      const m = this.snarePool[this.snareIdx];
+      this.snareIdx = (this.snareIdx + 1) % this.snarePool.length;
+      m.visible = true;
+      m.userData.life = 0;
+      m.userData.intensity = (0.55 + velocity * 0.7) * (k === 0 ? 1.0 : 0.8);
+      m.userData.duration = 1.05 + velocity * 0.35 + k * 0.08;
+      m.userData.t0 = performance.now() * 0.001 + k * 0.025;  // slight stagger
+      m.userData.axisJitter = (Math.random() - 0.5) * 0.6;
+      // first ring stays planar; others tilt for depth
+      if (k === 0) {
+        m.rotation.x = Math.PI * 0.5;
+        m.rotation.z = 0;
+      } else {
+        m.rotation.x = Math.PI * 0.5 + (Math.random() - 0.5) * 0.55;
+        m.rotation.z = (Math.random() - 0.5) * 0.45;
+      }
+      m.scale.setScalar(m.userData.scaleStart);
+    }
+    this.envSnare.trigger(0.55 + velocity * 0.7);
+  }
+
+  triggerHat(velocity) {
+    // spawn a burst of sparks
+    const N = 18 + Math.floor(velocity * 30);
+    const speed = 5.0 + velocity * 6.0;
+    for (let i = 0; i < N; i++) {
+      const idx = this.hatCursor;
+      this.hatCursor = (this.hatCursor + 1) % this.HAT_MAX;
+      // direction: roughly upward-cone, slight randomness
+      const yaw = Math.random() * Math.PI * 2;
+      const pitch = (Math.random() * 0.45 + 0.1) * Math.PI; // 0.1..0.55 pi from up
+      const sx = Math.sin(pitch) * Math.cos(yaw);
+      const sy = Math.cos(pitch);
+      const sz = Math.sin(pitch) * Math.sin(yaw);
+      const sp = speed * (0.7 + Math.random() * 0.6);
+      this.hatPos[idx*3+0] = (Math.random() - 0.5) * 0.2;
+      this.hatPos[idx*3+1] = 0.4 + Math.random() * 0.2;
+      this.hatPos[idx*3+2] = (Math.random() - 0.5) * 0.2;
+      this.hatVel[idx*3+0] = sx * sp;
+      this.hatVel[idx*3+1] = sy * sp + 1.2;
+      this.hatVel[idx*3+2] = sz * sp;
+      const total = 0.45 + Math.random() * 0.55;
+      this.hatLife[idx] = total; this.hatTotal[idx] = total;
+      this.hatSize[idx] = 1.4 + Math.random() * 1.6;
+      // warm white-yellow with rare cyan flecks
+      const fleck = Math.random() < 0.12;
+      const c = fleck ? COLORS.snare : COLORS.hat;
+      this.hatTint[idx*3+0] = c.r; this.hatTint[idx*3+1] = c.g; this.hatTint[idx*3+2] = c.b;
+    }
+    const g = this.hatPoints.geometry;
+    g.attributes.position.needsUpdate = true;
+    g.attributes.aLife.needsUpdate = true;
+    g.attributes.aTotal.needsUpdate = true;
+    g.attributes.aSize.needsUpdate = true;
+    g.attributes.aTint.needsUpdate = true;
+    this.envHat.trigger(0.5 + velocity * 0.5);
+  }
+
+  update(dt, time) {
+    const ek = this.envKick.update(dt);
+    const es = this.envSnare.update(dt);
+    const eh = this.envHat.update(dt);
+
+    // kick shells
+    const now = time;
+    for (const m of this.kickPool) {
+      if (!m.visible) continue;
+      const dur = m.userData.duration;
+      const age = now - m.userData.t0;
+      const t = clamp01(age / dur);
+      m.userData.life = t;
+      const scale = lerp(m.userData.scaleStart, m.userData.scaleEnd, easeOutCubic(t));
+      m.scale.setScalar(scale);
+      m.material.uniforms.uTime.value = now;
+      m.material.uniforms.uLife.value = t;
+      m.material.uniforms.uIntensity.value = m.userData.intensity;
+      if (t >= 1) m.visible = false;
+    }
+
+    // kick flash: tied to kick envelope
+    this.kickFlash.userData.mat.uniforms.uIntensity.value = ek * 1.4;
+    // face the camera
+    this.kickFlash.lookAt(camera.position);
+
+    // snare rings
+    for (const m of this.snarePool) {
+      if (!m.visible) continue;
+      const dur = m.userData.duration;
+      const age = now - m.userData.t0;
+      const t = clamp01(age / dur);
+      m.userData.life = t;
+      const scale = lerp(m.userData.scaleStart, m.userData.scaleEnd, easeOutCubic(t));
+      m.scale.setScalar(scale);
+      m.material.uniforms.uLife.value = t;
+      m.material.uniforms.uIntensity.value = m.userData.intensity;
+      m.material.uniforms.uTime.value = now;
+      // wobble the axis slightly
+      m.rotation.z += dt * 0.4 * m.userData.axisJitter;
+      if (t >= 1) m.visible = false;
+    }
+
+    // hi-hat sparks
+    const pos = this.hatPos, vel = this.hatVel, life = this.hatLife, total = this.hatTotal;
+    for (let i = 0; i < this.HAT_MAX; i++) {
+      if (life[i] <= 0) continue;
+      // simple gravity + drag so sparks arc and slow
+      vel[i*3+0] *= (1 - dt * 1.4);
+      vel[i*3+1] += -3.2 * dt;     // gravity
+      vel[i*3+1] *= (1 - dt * 0.6);
+      vel[i*3+2] *= (1 - dt * 1.4);
+      pos[i*3+0] += vel[i*3+0] * dt;
+      pos[i*3+1] += vel[i*3+1] * dt;
+      pos[i*3+2] += vel[i*3+2] * dt;
+      life[i] -= dt;
+      if (life[i] <= 0) {
+        pos[i*3+0] = 9999; pos[i*3+1] = 9999; pos[i*3+2] = 9999;
+        life[i] = 0;
+      }
+    }
+    // hatPos / hatLife are the underlying arrays of these attributes — direct
+    // mutation is enough; just flag for upload.
+    const g = this.hatPoints.geometry;
+    g.attributes.position.needsUpdate = true;
+    g.attributes.aLife.needsUpdate = true;
+
+    // floor pulse from combined drum activity
+    this.floor.material.uniforms.uTime.value = now;
+    this.floor.material.uniforms.uEnergy.value = Math.max(ek, es * 0.6, eh * 0.4);
+
+    return { kick: ek, snare: es, hat: eh };
+  }
+}
+
+// ---- BASS ----------------------------------------------------------------
+// Deep blue/purple organic blob — high-poly icosahedron displaced by 3D
+// simplex noise in the vertex shader, with a procedural rim/glow in the
+// fragment shader. The blob "breathes" continuously and pulses on each note.
+// Surrounded by orbiting energy particles for atmosphere.
+class BassVisual {
+  constructor() {
+    this.group = new THREE.Group();
+    this.group.position.copy(POSITIONS.bass);
+    this.env = new Envelope(0.04, 0.85);
+    this.envFast = new Envelope(0.018, 0.35); // for sharp pulse highlights
+    this.lastNote = 36;
+
+    // ---- the blob: icosahedron with high subdivision so noise reads cleanly
+    // (detail=5 = 20480 tris — smooth enough for the displacement and easy on the GPU)
+    const geo = new THREE.IcosahedronGeometry(1.6, 5);
+    const mat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: true,
+      // Normal blending for the body keeps the silhouette sculpted; the
+      // additive rim color and orbiting particles do the glow work.
+      blending: THREE.NormalBlending,
+      side: THREE.FrontSide,
+      uniforms: {
+        uTime: { value: 0 },
+        uEnergy: { value: 0 },
+        uPulse: { value: 0 },
+        uPitch: { value: 0.5 },     // 0..1
+        uColorA: { value: COLORS.bassA.clone() },
+        uColorB: { value: COLORS.bassB.clone() },
+        uColorRim: { value: new THREE.Color('#a988ff') },
+      },
+      vertexShader: /* glsl */`
+        uniform float uTime; uniform float uEnergy; uniform float uPulse; uniform float uPitch;
+        varying vec3 vN; varying float vDisp; varying vec3 vWorld; varying vec3 vViewDir;
+        ${GLSL_NOISE}
+        void main() {
+          // multi-octave noise drives organic displacement
+          vec3 p = position;
+          float t = uTime * 0.35;
+          float n1 = snoise(p * 0.85 + vec3(t, t*0.6, -t*0.4));
+          float n2 = snoise(p * 1.9  + vec3(-t*0.7, t*1.1, t*0.5)) * 0.55;
+          float n3 = snoise(p * 4.2  + vec3(t*1.3, -t*0.9, t*0.7)) * 0.22;
+          float disp = (n1 + n2 + n3);
+          // breathing baseline + pulse on note + slight pitch-driven sharpness
+          float amp = 0.18 + uEnergy * 0.55 + uPulse * 0.55 + (uPitch - 0.5) * 0.10;
+          vec3 displaced = p + normal * disp * amp;
+          vDisp = disp;
+          vN = normalize(normalMatrix * normal);
+          vec4 mv = modelViewMatrix * vec4(displaced, 1.0);
+          vWorld = (modelMatrix * vec4(displaced, 1.0)).xyz;
+          vViewDir = normalize(-mv.xyz);
+          gl_Position = projectionMatrix * mv;
+        }
+      `,
+      fragmentShader: /* glsl */`
+        uniform float uTime; uniform float uEnergy; uniform float uPulse;
+        uniform vec3 uColorA; uniform vec3 uColorB; uniform vec3 uColorRim;
+        varying vec3 vN; varying float vDisp; varying vec3 vWorld; varying vec3 vViewDir;
+        void main() {
+          // fresnel rim — broad and bright so the blob reads silhouetted
+          float fres = pow(1.0 - max(dot(vN, vViewDir), 0.0), 2.2);
+          // body: deep purple/blue gradient driven by noise crests
+          vec3 body = mix(uColorA, uColorB, smoothstep(-0.6, 0.6, vDisp));
+          body *= (0.35 + 0.45 * (1.0 - fres));
+          // rim glow — strong color bleed at silhouette
+          vec3 rim = uColorRim * fres * (1.4 + uEnergy * 1.2 + uPulse * 1.4);
+          // hot crests that brighten on pulse — like compression on the surface
+          vec3 heat = vec3(1.0, 0.55, 1.1) * pow(max(vDisp, 0.0), 1.8) * (0.25 + uPulse * 1.2);
+          // subtle inner shimmer driven by view-aligned bands
+          float bands = 0.5 + 0.5 * sin(vDisp * 6.0 + uTime * 0.6);
+          vec3 col = body + rim + heat + uColorA * 0.05 * bands;
+          // alpha: solid in the middle, fades only at extreme grazing (so silhouette is crisp)
+          float a = clamp(0.78 + 0.22 * fres + uPulse * 0.15, 0.0, 1.0);
+          gl_FragColor = vec4(col * (0.95 + 0.5 * uEnergy), a);
+        }
+      `,
+    });
+    this.blob = new THREE.Mesh(geo, mat);
+    // render the blob before the additive layers so additive blends correctly on top
+    this.blob.renderOrder = 0;
+    this.group.add(this.blob);
+
+    // ---- inner core: small bright sphere that brightens on each pulse
+    {
+      const cgeo = new THREE.SphereGeometry(0.55, 32, 24);
+      const cmat = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        uniforms: {
+          uPulse: { value: 0 },
+          uEnergy: { value: 0 },
+          uColor: { value: new THREE.Color('#ffffff') },
+        },
+        vertexShader: `
+          varying vec3 vN; varying vec3 vView;
+          void main() {
+            vN = normalize(normalMatrix * normal);
+            vec4 mv = modelViewMatrix * vec4(position, 1.0);
+            vView = normalize(-mv.xyz);
+            gl_Position = projectionMatrix * mv;
+          }
+        `,
+        fragmentShader: `
+          uniform float uPulse; uniform float uEnergy; uniform vec3 uColor;
+          varying vec3 vN; varying vec3 vView;
+          void main() {
+            float f = pow(1.0 - max(dot(vN, vView), 0.0), 1.8);
+            float a = (0.15 + 0.85 * f) * (0.25 + uPulse * 1.2 + uEnergy * 0.3);
+            vec3 col = mix(uColor, vec3(0.8, 0.65, 1.0), 1.0 - f);
+            gl_FragColor = vec4(col * a * 1.5, a);
+          }
+        `,
+      });
+      this.core = new THREE.Mesh(cgeo, cmat);
+      this.group.add(this.core);
+    }
+
+    // ---- orbiting particles: thin dust around the blob, additive
+    this.ORB_COUNT = 1400;
+    {
+      const g = new THREE.BufferGeometry();
+      const pos = new Float32Array(this.ORB_COUNT * 3);
+      const seed = new Float32Array(this.ORB_COUNT * 3);
+      const tint = new Float32Array(this.ORB_COUNT * 3);
+      const size = new Float32Array(this.ORB_COUNT);
+      for (let i = 0; i < this.ORB_COUNT; i++) {
+        // thick spherical shell biased outward
+        const r = 1.9 + Math.pow(Math.random(), 1.6) * 3.2;
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(2 * Math.random() - 1);
+        pos[i*3+0] = r * Math.sin(phi) * Math.cos(theta);
+        pos[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
+        pos[i*3+2] = r * Math.cos(phi);
+        // store an axis seed for orbital animation
+        seed[i*3+0] = (Math.random() - 0.5) * 2;
+        seed[i*3+1] = (Math.random() - 0.5) * 2;
+        seed[i*3+2] = Math.random() * Math.PI * 2;
+        const c = Math.random() < 0.4 ? COLORS.bassB : COLORS.bassA;
+        tint[i*3+0] = c.r * (0.7 + Math.random()*0.4);
+        tint[i*3+1] = c.g * (0.7 + Math.random()*0.4);
+        tint[i*3+2] = c.b * (0.7 + Math.random()*0.4);
+        size[i] = 0.6 + Math.random() * 1.6;
+      }
+      g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      g.setAttribute('aSeed',    new THREE.BufferAttribute(seed, 3));
+      g.setAttribute('aTint',    new THREE.BufferAttribute(tint, 3));
+      g.setAttribute('aSize',    new THREE.BufferAttribute(size, 1));
+      const m = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        uniforms: {
+          uTime: { value: 0 },
+          uEnergy: { value: 0 },
+          uPulse: { value: 0 },
+          uPixelRatio: { value: renderer.getPixelRatio() },
+        },
+        vertexShader: /* glsl */`
+          attribute vec3 aSeed; attribute vec3 aTint; attribute float aSize;
+          uniform float uTime; uniform float uEnergy; uniform float uPulse; uniform float uPixelRatio;
+          varying vec3 vTint; varying float vBoost;
+          void main() {
+            // rotate around a per-particle axis (encoded in aSeed.xy)
+            float spin = uTime * (0.10 + 0.18 * length(aSeed.xy)) + aSeed.z;
+            float c = cos(spin), s = sin(spin);
+            vec3 p = position;
+            // simple Y-axis spin for now; very cheap
+            float x = p.x * c - p.z * s;
+            float z = p.x * s + p.z * c;
+            p.x = x; p.z = z;
+            // gentle radial breathing on energy/pulse
+            float r = length(p);
+            float breathe = 1.0 + 0.06 * sin(uTime * 0.7 + aSeed.x * 5.0) + uPulse * 0.18 + uEnergy * 0.10;
+            p *= breathe;
+            vTint = aTint;
+            vBoost = 0.6 + uEnergy * 0.7 + uPulse * 0.9;
+            vec4 mv = modelViewMatrix * vec4(p, 1.0);
+            gl_Position = projectionMatrix * mv;
+            gl_PointSize = aSize * uPixelRatio * 60.0 / -mv.z;
+          }
+        `,
+        fragmentShader: /* glsl */`
+          varying vec3 vTint; varying float vBoost;
+          void main() {
+            vec2 uv = gl_PointCoord - 0.5;
+            float d = length(uv);
+            float core = smoothstep(0.5, 0.0, d);
+            float halo = smoothstep(0.5, 0.18, d) * 0.5;
+            float a = (core + halo) * vBoost;
+            gl_FragColor = vec4(vTint * a * 1.5, a);
+          }
+        `,
+      });
+      this.orbits = new THREE.Points(g, m);
+      this.orbits.frustumCulled = false;
+      // orbits read depth from the blob (they're behind/in-front of it correctly)
+      // but draw after so additive blending lands on top
+      this.orbits.renderOrder = 1;
+      this.group.add(this.orbits);
+    }
+
+    // ---- ground tether: a thin cylinder of light from blob down into the abyss,
+    // visually anchors the bass in the scene.
+    {
+      const tgeo = new THREE.CylinderGeometry(0.02, 0.6, 5.5, 24, 1, true);
+      const tmat = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        uniforms: {
+          uTime: { value: 0 },
+          uEnergy: { value: 0 },
+          uColor: { value: COLORS.bassB.clone() },
+        },
+        vertexShader: `
+          varying vec2 vUv; varying float vY;
+          void main() { vUv = uv; vY = position.y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+        `,
+        fragmentShader: `
+          uniform float uTime; uniform float uEnergy; uniform vec3 uColor; varying vec2 vUv; varying float vY;
+          void main() {
+            float fall = smoothstep(-2.5, 1.5, vY);
+            float band = 0.5 + 0.5 * sin(vY * 4.0 + uTime * 1.5);
+            float a = (1.0 - fall) * (0.18 + 0.55 * band) * (0.4 + uEnergy * 1.4);
+            gl_FragColor = vec4(uColor * a * 1.6, a);
+          }
+        `,
+      });
+      this.tether = new THREE.Mesh(tgeo, tmat);
+      this.tether.position.y = -2.7;
+      this.group.add(this.tether);
+    }
+  }
+
+  trigger(velocity, midiNote) {
+    this.lastNote = midiNote;
+    this.env.trigger(0.5 + velocity * 0.7);
+    this.envFast.trigger(0.7 + velocity * 0.6);
+  }
+
+  setSustain(level) {
+    // when a long bass note is held, keep energy elevated
+    this.env.set(Math.max(this.env.target, level));
+  }
+
+  update(dt, time) {
+    const e = this.env.update(dt);
+    const p = this.envFast.update(dt);
+    // pitch normalized to 0..1 from a typical bass register (E1=28 .. E3=52)
+    const pitch01 = clamp01((this.lastNote - 28) / 24);
+
+    const blobMat = this.blob.material.uniforms;
+    blobMat.uTime.value = time;
+    blobMat.uEnergy.value = e;
+    blobMat.uPulse.value = p;
+    blobMat.uPitch.value = pitch01;
+    // scale subtly with pitch so high bass notes feel tighter
+    const sBase = 1.0 - (pitch01 - 0.5) * 0.10;
+    this.blob.scale.setScalar(sBase + p * 0.06);
+
+    this.core.material.uniforms.uPulse.value = p;
+    this.core.material.uniforms.uEnergy.value = e;
+    // tilt the core to face camera-ish
+    this.core.rotation.y += dt * 0.35;
+    this.core.rotation.x += dt * 0.21;
+
+    const om = this.orbits.material.uniforms;
+    om.uTime.value = time;
+    om.uEnergy.value = e;
+    om.uPulse.value = p;
+
+    this.tether.material.uniforms.uTime.value = time;
+    this.tether.material.uniforms.uEnergy.value = e;
+
+    // gentle group sway so bass feels alive between notes
+    this.group.position.y = POSITIONS.bass.y + Math.sin(time * 0.45) * 0.12;
+    this.group.rotation.y = Math.sin(time * 0.25) * 0.15;
+
+    return e;
+  }
+}
+
+// ---- (melody class is below; pads/lead come after it) -------------------
+// Gold particle streams that arc through space like comets. Each note spawns
+// a comet — a head + a long fading trail — that travels along a Bezier arc.
+// Pitch controls the apex height; velocity controls brightness and trail
+// length. Trails are rendered as instanced Points along a curve, with a
+// per-particle "age" attribute that fades them.
+class MelodyVisual {
+  constructor() {
+    this.group = new THREE.Group();
+    this.group.position.copy(POSITIONS.melody);
+    this.env = new Envelope(0.02, 0.5);
+
+    // pool of comets — each is a small head + a trail of points
+    this.MAX_COMETS = 14;
+    this.TRAIL_LEN  = 64;        // particles per comet trail
+    this.comets = [];
+    for (let i = 0; i < this.MAX_COMETS; i++) {
+      const trail = this._makeTrail();
+      this.group.add(trail.head);
+      this.group.add(trail.points);
+      this.comets.push(trail);
+    }
+    this.cIdx = 0;
+
+    // anchor halo — a soft cluster behind the spawn point so the area glows
+    {
+      const geo = new THREE.PlaneGeometry(4.5, 4.5);
+      const mat = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        uniforms: { uEnergy: { value: 0 }, uColor: { value: COLORS.melodyA.clone() } },
+        vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+        fragmentShader: `
+          uniform float uEnergy; uniform vec3 uColor; varying vec2 vUv;
+          void main() {
+            vec2 p = vUv - 0.5; float d = length(p) * 2.0;
+            float a = exp(-d * 2.4) * (0.18 + uEnergy * 1.0);
+            gl_FragColor = vec4(uColor * a * 1.6, a);
+          }
+        `,
+      });
+      this.halo = new THREE.Mesh(geo, mat);
+      this.group.add(this.halo);
+    }
+  }
+
+  _makeTrail() {
+    // head: bright additive billboard with tight core + wide halo
+    const headGeo = new THREE.PlaneGeometry(1.6, 1.6);
+    const headMat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      uniforms: { uIntensity: { value: 0 }, uColor: { value: COLORS.melodyA.clone() } },
+      vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+      fragmentShader: `
+        uniform float uIntensity; uniform vec3 uColor; varying vec2 vUv;
+        void main() {
+          vec2 uv = vUv - 0.5; float d = length(uv) * 2.0;
+          float core = exp(-d * 6.5);
+          float mid  = exp(-d * 2.4) * 0.45;
+          float halo = exp(-d * 0.9) * 0.18;
+          float a = (core + mid + halo) * uIntensity;
+          // hot white center bleeds to gold at the edge
+          vec3 col = mix(uColor, vec3(1.0, 0.96, 0.85), pow(core, 0.6));
+          gl_FragColor = vec4(col * a * 2.0, a);
+        }
+      `,
+    });
+    const head = new THREE.Mesh(headGeo, headMat);
+    head.visible = false;
+
+    // trail: Points where each particle has its own position + age
+    const tGeo = new THREE.BufferGeometry();
+    const pos  = new Float32Array(this.TRAIL_LEN * 3);
+    const age  = new Float32Array(this.TRAIL_LEN);
+    const tint = new Float32Array(this.TRAIL_LEN * 3);
+    for (let i = 0; i < this.TRAIL_LEN; i++) {
+      pos[i*3+0] = 9999; pos[i*3+1] = 9999; pos[i*3+2] = 9999;
+      age[i] = 1.0;
+      tint[i*3+0] = COLORS.melodyA.r; tint[i*3+1] = COLORS.melodyA.g; tint[i*3+2] = COLORS.melodyA.b;
+    }
+    tGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    tGeo.setAttribute('aAge',     new THREE.BufferAttribute(age, 1));
+    tGeo.setAttribute('aTint',    new THREE.BufferAttribute(tint, 3));
+    const tMat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      uniforms: {
+        uPixelRatio: { value: renderer.getPixelRatio() },
+        uIntensity:  { value: 0 },
+      },
+      vertexShader: `
+        attribute float aAge; attribute vec3 aTint;
+        uniform float uPixelRatio; uniform float uIntensity;
+        varying float vAge; varying vec3 vTint; varying float vBoost;
+        void main() {
+          vAge = aAge; vTint = aTint; vBoost = uIntensity;
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          gl_Position = projectionMatrix * mv;
+          // older particles shrink slightly
+          float life = 1.0 - aAge;
+          gl_PointSize = (1.6 + life * 4.0) * uPixelRatio * 60.0 / -mv.z;
+        }
+      `,
+      fragmentShader: `
+        varying float vAge; varying vec3 vTint; varying float vBoost;
+        void main() {
+          vec2 uv = gl_PointCoord - 0.5;
+          float d = length(uv);
+          float core = smoothstep(0.5, 0.0, d);
+          float halo = smoothstep(0.5, 0.18, d) * 0.55;
+          float life = 1.0 - vAge;
+          float a = (core + halo) * pow(life, 1.4) * (0.5 + vBoost);
+          gl_FragColor = vec4(vTint * a * 1.5, a);
+        }
+      `,
+    });
+    const points = new THREE.Points(tGeo, tMat);
+    points.frustumCulled = false;
+
+    return {
+      head, points, headMat, tMat, tGeo, pos, age, tint,
+      active: false,
+      // bezier control points (worked in *local* space of melody group)
+      p0: new THREE.Vector3(),
+      p1: new THREE.Vector3(),
+      p2: new THREE.Vector3(),
+      p3: new THREE.Vector3(),
+      duration: 1.6,
+      t0: 0,
+      intensity: 1,
+      cursor: 0,
+    };
+  }
+
+  trigger(velocity, midiNote) {
+    const c = this.comets[this.cIdx];
+    this.cIdx = (this.cIdx + 1) % this.MAX_COMETS;
+    c.active = true;
+    c.t0 = performance.now() * 0.001;
+    c.duration = 1.4 + (1.0 - velocity) * 0.9;     // softer notes linger longer
+    c.intensity = 0.6 + velocity * 0.7;
+
+    // pitch -> apex height: map MIDI 48..96 to height in local space
+    const pitch01 = clamp01((midiNote - 48) / 48);
+    const apexY = lerp(-2.5, 6.0, easeInOutSine(pitch01));
+
+    // randomized start near the anchor, traveling across the upper region
+    const sideStart = Math.random() < 0.5 ? -1 : 1;
+    c.p0.set( sideStart * (1.5 + Math.random()*0.6), -1.5 + Math.random()*0.6,  Math.random()*1.0 - 0.5);
+    c.p1.set( sideStart *  4.5 + (Math.random()-0.5)*1.5, apexY * 0.5 + 0.5,  -1.5 + Math.random()*1.0);
+    c.p2.set(-sideStart *  3.0 + (Math.random()-0.5)*2.0, apexY,               1.5 + Math.random()*1.0);
+    c.p3.set(-sideStart * (4.5 + Math.random()*1.0),  -1.0 + Math.random()*1.5, -1.5 + Math.random()*2.5);
+
+    // initialise trail particles to start point with full age (so they fade in)
+    for (let i = 0; i < this.TRAIL_LEN; i++) {
+      c.pos[i*3+0] = c.p0.x; c.pos[i*3+1] = c.p0.y; c.pos[i*3+2] = c.p0.z;
+      c.age[i] = 1.0;
+    }
+    // tint shimmers slightly between gold and orange per particle
+    for (let i = 0; i < this.TRAIL_LEN; i++) {
+      const k = Math.random();
+      c.tint[i*3+0] = lerp(COLORS.melodyA.r, COLORS.melodyB.r, k);
+      c.tint[i*3+1] = lerp(COLORS.melodyA.g, COLORS.melodyB.g, k);
+      c.tint[i*3+2] = lerp(COLORS.melodyA.b, COLORS.melodyB.b, k);
+    }
+    c.tGeo.attributes.position.needsUpdate = true;
+    c.tGeo.attributes.aAge.needsUpdate = true;
+    c.tGeo.attributes.aTint.needsUpdate = true;
+    c.cursor = 0;
+
+    c.head.visible = true;
+    c.headMat.uniforms.uIntensity.value = c.intensity * 1.2;
+    c.tMat.uniforms.uIntensity.value = c.intensity;
+
+    this.env.trigger(0.4 + velocity * 0.6);
+  }
+
+  update(dt, time) {
+    const e = this.env.update(dt);
+    this.halo.material.uniforms.uEnergy.value = e;
+    this.halo.lookAt(camera.position);
+
+    for (const c of this.comets) {
+      if (!c.active) continue;
+      const age = (time - c.t0) / c.duration;
+      if (age >= 1) {
+        c.active = false;
+        c.head.visible = false;
+        // tail still fades; positions stay parked
+        for (let i = 0; i < this.TRAIL_LEN; i++) c.age[i] = 1.0;
+        c.tGeo.attributes.aAge.needsUpdate = true;
+        continue;
+      }
+
+      // eased progress along the bezier
+      const t = easeInOutSine(age);
+      const omt = 1 - t;
+      const headPos = new THREE.Vector3(
+        omt*omt*omt * c.p0.x + 3*omt*omt*t * c.p1.x + 3*omt*t*t * c.p2.x + t*t*t * c.p3.x,
+        omt*omt*omt * c.p0.y + 3*omt*omt*t * c.p1.y + 3*omt*t*t * c.p2.y + t*t*t * c.p3.y,
+        omt*omt*omt * c.p0.z + 3*omt*omt*t * c.p1.z + 3*omt*t*t * c.p2.z + t*t*t * c.p3.z,
+      );
+      c.head.position.copy(headPos);
+      c.head.lookAt(camera.position);
+      // head intensity peaks mid-flight then fades
+      const hint = Math.sin(age * Math.PI) * c.intensity * 1.3;
+      c.headMat.uniforms.uIntensity.value = hint;
+      c.tMat.uniforms.uIntensity.value = hint * 0.9;
+
+      // shed a particle into the trail at the current head position
+      const idx = c.cursor;
+      c.cursor = (c.cursor + 1) % this.TRAIL_LEN;
+      // small jitter so trail isn't a perfectly clean curve
+      const j = 0.05;
+      c.pos[idx*3+0] = headPos.x + (Math.random()-0.5) * j;
+      c.pos[idx*3+1] = headPos.y + (Math.random()-0.5) * j;
+      c.pos[idx*3+2] = headPos.z + (Math.random()-0.5) * j;
+      c.age[idx] = 0.0;
+
+      // age all particles
+      for (let i = 0; i < this.TRAIL_LEN; i++) {
+        c.age[i] = Math.min(1.0, c.age[i] + dt * 0.55);
+      }
+      c.tGeo.attributes.position.needsUpdate = true;
+      c.tGeo.attributes.aAge.needsUpdate = true;
+    }
+
+    // gentle group sway
+    this.group.position.x = POSITIONS.melody.x + Math.sin(time * 0.18) * 0.18;
+    this.group.position.y = POSITIONS.melody.y + Math.sin(time * 0.13 + 1.0) * 0.20;
+
+    return e;
+  }
+}
+
+// ---- PADS ---------------------------------------------------------------
+// Teal/violet volumetric clouds in the background. We fake volumetrics with:
+//   • dense additive Points (thousands of soft puffs)
+//   • a quad-billboard "nebula" sheet using fbm in the fragment shader
+//   • slow fbm-driven motion that fills the space and evolves over time
+class PadsVisual {
+  constructor() {
+    this.group = new THREE.Group();
+    this.group.position.copy(POSITIONS.pads);
+    this.env = new Envelope(0.25, 1.6);
+
+    // ---- nebula sheet: large additive plane behind everything,
+    // procedurally rendered with fbm so it always looks unique
+    {
+      const geo = new THREE.PlaneGeometry(60, 38, 1, 1);
+      const mat = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        uniforms: {
+          uTime: { value: 0 },
+          uEnergy: { value: 0 },
+          uColorA: { value: COLORS.padA.clone() },
+          uColorB: { value: COLORS.padB.clone() },
+        },
+        vertexShader: `
+          varying vec2 vUv;
+          void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+        `,
+        fragmentShader: /* glsl */`
+          uniform float uTime; uniform float uEnergy;
+          uniform vec3 uColorA; uniform vec3 uColorB;
+          varying vec2 vUv;
+          ${GLSL_NOISE}
+          // 5-octave fbm
+          float fbm(vec3 p){
+            float v = 0.0; float a = 0.5;
+            for (int i=0; i<5; i++) {
+              v += a * snoise(p);
+              p *= 2.02;
+              a *= 0.5;
+            }
+            return v;
+          }
+          void main() {
+            vec2 p = vUv - 0.5;
+            // domain warping for swirl
+            vec3 q = vec3(p * 1.4, uTime * 0.06);
+            float w1 = fbm(q + vec3(0.0, 0.0, 0.7));
+            float w2 = fbm(q + vec3(2.3, -1.7, -0.4));
+            vec3 q2 = vec3(p * 2.2 + vec2(w1, w2) * 0.6, uTime * 0.04);
+            float n = fbm(q2);
+            // shape it into soft cloud bands
+            float density = smoothstep(0.05, 0.85, n + 0.4 - length(p) * 0.6);
+            // color drift between teal and violet
+            float mixT = 0.5 + 0.5 * sin(uTime * 0.05 + n * 1.4);
+            vec3 col = mix(uColorA, uColorB, mixT);
+            // brighten on energy
+            col *= (0.7 + 0.7 * uEnergy);
+            float a = density * (0.55 + 0.45 * uEnergy);
+            // very subtle vignette via radial falloff
+            a *= smoothstep(0.95, 0.25, length(p) * 1.2);
+            gl_FragColor = vec4(col * a, a);
+          }
+        `,
+      });
+      this.nebula = new THREE.Mesh(geo, mat);
+      this.nebula.position.z = -2.0; // slightly behind the group anchor
+      this.group.add(this.nebula);
+    }
+
+    // ---- secondary nebula sheet, parallax + slower
+    {
+      const geo = new THREE.PlaneGeometry(80, 50, 1, 1);
+      const mat = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        uniforms: {
+          uTime: { value: 0 },
+          uEnergy: { value: 0 },
+          uColorA: { value: new THREE.Color('#3a1f7a') },
+          uColorB: { value: new THREE.Color('#0a3052') },
+        },
+        vertexShader: `
+          varying vec2 vUv;
+          void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+        `,
+        fragmentShader: /* glsl */`
+          uniform float uTime; uniform float uEnergy;
+          uniform vec3 uColorA; uniform vec3 uColorB;
+          varying vec2 vUv;
+          ${GLSL_NOISE}
+          float fbm(vec3 p){
+            float v = 0.0; float a = 0.5;
+            for (int i=0; i<4; i++) { v += a * snoise(p); p *= 2.05; a *= 0.5; }
+            return v;
+          }
+          void main() {
+            vec2 p = vUv - 0.5;
+            vec3 q = vec3(p * 1.0, uTime * 0.03);
+            float n = fbm(q);
+            float density = smoothstep(0.1, 0.8, n);
+            vec3 col = mix(uColorA, uColorB, 0.5 + 0.5 * sin(uTime * 0.04));
+            col *= (0.5 + 0.6 * uEnergy);
+            float a = density * (0.35 + 0.4 * uEnergy);
+            a *= smoothstep(0.95, 0.2, length(p) * 1.15);
+            gl_FragColor = vec4(col * a, a);
+          }
+        `,
+      });
+      this.nebula2 = new THREE.Mesh(geo, mat);
+      this.nebula2.position.z = -6.5;
+      this.group.add(this.nebula2);
+    }
+
+    // ---- volumetric puffs: many additive points, drifting via fbm-like motion
+    this.PUFF_COUNT = 2200;
+    {
+      const g = new THREE.BufferGeometry();
+      const pos  = new Float32Array(this.PUFF_COUNT * 3);
+      const seed = new Float32Array(this.PUFF_COUNT * 3);
+      const tint = new Float32Array(this.PUFF_COUNT * 3);
+      const size = new Float32Array(this.PUFF_COUNT);
+      for (let i = 0; i < this.PUFF_COUNT; i++) {
+        // a wide, shallow cloud volume behind the scene
+        const r = Math.pow(Math.random(), 0.6);
+        const theta = Math.random() * Math.PI * 2;
+        const radius = 8 + r * 18;
+        pos[i*3+0] = Math.cos(theta) * radius * (0.9 + Math.random()*0.3);
+        pos[i*3+1] = (Math.random() - 0.5) * 12;
+        pos[i*3+2] = -2 - Math.random() * 8 - r * 6;
+        seed[i*3+0] = Math.random() * 100;
+        seed[i*3+1] = Math.random() * 100;
+        seed[i*3+2] = Math.random() * Math.PI * 2;
+        // mix between teal and violet, with rare deep-blue
+        const k = Math.random();
+        const c = (k < 0.45) ? COLORS.padA : (k < 0.85 ? COLORS.padB : new THREE.Color('#1a3a8e'));
+        tint[i*3+0] = c.r; tint[i*3+1] = c.g; tint[i*3+2] = c.b;
+        size[i] = 4.0 + Math.random() * 7.0;
+      }
+      g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      g.setAttribute('aSeed',    new THREE.BufferAttribute(seed, 3));
+      g.setAttribute('aTint',    new THREE.BufferAttribute(tint, 3));
+      g.setAttribute('aSize',    new THREE.BufferAttribute(size, 1));
+      const m = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        uniforms: {
+          uTime: { value: 0 },
+          uEnergy: { value: 0 },
+          uPixelRatio: { value: renderer.getPixelRatio() },
+        },
+        vertexShader: /* glsl */`
+          attribute vec3 aSeed; attribute vec3 aTint; attribute float aSize;
+          uniform float uTime; uniform float uEnergy; uniform float uPixelRatio;
+          varying vec3 vTint; varying float vBoost;
+          void main() {
+            // slow drift offsets via cheap sin combos (fbm in vert is too costly)
+            vec3 p = position;
+            float t = uTime * 0.04;
+            p.x += sin(t * 0.7 + aSeed.x) * 0.7;
+            p.y += sin(t * 0.5 + aSeed.y) * 0.5;
+            p.z += sin(t * 0.6 + aSeed.z) * 0.5;
+            // gentle scale-breathing on energy
+            float br = 1.0 + 0.06 * sin(uTime * 0.5 + aSeed.x);
+            p.xy *= br;
+            vTint = aTint;
+            vBoost = 0.4 + uEnergy * 1.0;
+            vec4 mv = modelViewMatrix * vec4(p, 1.0);
+            gl_Position = projectionMatrix * mv;
+            gl_PointSize = aSize * uPixelRatio * 90.0 / -mv.z;
+          }
+        `,
+        fragmentShader: /* glsl */`
+          varying vec3 vTint; varying float vBoost;
+          void main() {
+            vec2 uv = gl_PointCoord - 0.5;
+            float d = length(uv);
+            // soft puff: gaussian-ish falloff
+            float a = exp(-d * d * 14.0) * 0.85 + smoothstep(0.5, 0.0, d) * 0.15;
+            a *= vBoost;
+            gl_FragColor = vec4(vTint * a * 0.85, a * 0.8);
+          }
+        `,
+      });
+      this.puffs = new THREE.Points(g, m);
+      this.puffs.frustumCulled = false;
+      this.group.add(this.puffs);
+    }
+
+    // ---- soft "aura" billboard close to the anchor — fills mids
+    {
+      const geo = new THREE.PlaneGeometry(22, 14);
+      const mat = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        uniforms: {
+          uTime: { value: 0 },
+          uEnergy: { value: 0 },
+          uColorA: { value: COLORS.padA.clone() },
+          uColorB: { value: COLORS.padB.clone() },
+        },
+        vertexShader: `
+          varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+        `,
+        fragmentShader: /* glsl */`
+          uniform float uTime; uniform float uEnergy; uniform vec3 uColorA; uniform vec3 uColorB;
+          varying vec2 vUv;
+          ${GLSL_NOISE}
+          void main() {
+            vec2 p = vUv - 0.5;
+            float n = snoise(vec3(p * 2.5, uTime * 0.08));
+            float a = exp(-dot(p, p) * 4.0) * (0.35 + 0.4 * uEnergy + 0.2 * n);
+            vec3 col = mix(uColorA, uColorB, 0.5 + 0.5 * sin(uTime * 0.07 + n));
+            gl_FragColor = vec4(col * a * 1.1, a);
+          }
+        `,
+      });
+      this.aura = new THREE.Mesh(geo, mat);
+      this.aura.position.z = 0.5;
+      this.group.add(this.aura);
+    }
+  }
+
+  trigger(velocity) {
+    // pads grow gradually — a single note bumps energy modestly
+    this.env.trigger(0.4 + velocity * 0.6);
+  }
+
+  setSustain(level) {
+    this.env.set(Math.max(this.env.target, level));
+  }
+
+  update(dt, time) {
+    const e = this.env.update(dt);
+    this.nebula.material.uniforms.uTime.value = time;
+    this.nebula.material.uniforms.uEnergy.value = e;
+    this.nebula2.material.uniforms.uTime.value = time;
+    this.nebula2.material.uniforms.uEnergy.value = e * 0.7;
+    this.puffs.material.uniforms.uTime.value = time;
+    this.puffs.material.uniforms.uEnergy.value = e;
+    this.aura.material.uniforms.uTime.value = time;
+    this.aura.material.uniforms.uEnergy.value = e;
+
+    // billboard the aura
+    this.aura.lookAt(camera.position);
+    // very slow rotation of nebulas for drift
+    this.nebula.rotation.z = Math.sin(time * 0.02) * 0.15;
+    this.nebula2.rotation.z = Math.sin(time * 0.013 + 1.0) * 0.10;
+
+    return e;
+  }
+}
+
+// ---- LEAD ---------------------------------------------------------------
+// White/gold flowing energy ribbons. Each note creates a ribbon — a swept
+// TubeGeometry along a Catmull-Rom curve whose control points evolve over
+// the note's lifetime. The ribbon is rendered with a glowing shader that
+// emphasises bright cores and soft edges.
+class LeadVisual {
+  constructor() {
+    this.group = new THREE.Group();
+    this.group.position.copy(POSITIONS.lead);
+    this.env = new Envelope(0.02, 0.6);
+
+    this.MAX_RIBBONS = 8;
+    this.SEG = 56;       // tube segments — balanced for smoothness vs rebuild cost
+    this.RAD_SEG = 8;
+    this.ribbons = [];
+    for (let i = 0; i < this.MAX_RIBBONS; i++) {
+      this.ribbons.push(this._makeRibbon());
+    }
+    this.rIdx = 0;
+
+    // central spark — always-on subtle glow at the lead anchor
+    {
+      const geo = new THREE.PlaneGeometry(2.4, 2.4);
+      const mat = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        uniforms: { uEnergy: { value: 0 }, uColor: { value: new THREE.Color('#fff5d0') } },
+        vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+        fragmentShader: `
+          uniform float uEnergy; uniform vec3 uColor; varying vec2 vUv;
+          void main() {
+            vec2 p = vUv - 0.5; float d = length(p) * 2.0;
+            float core = exp(-d * 5.0);
+            float halo = exp(-d * 1.5) * 0.5;
+            float a = (core + halo) * (0.18 + uEnergy * 1.5);
+            gl_FragColor = vec4(uColor * a * 1.6, a);
+          }
+        `,
+      });
+      this.spark = new THREE.Mesh(geo, mat);
+      this.group.add(this.spark);
+    }
+  }
+
+  _makeRibbon() {
+    // build an empty curve and tube; we'll rebuild geometry each frame
+    const N_CONTROL = 8;
+    const ctrl = [];
+    for (let i = 0; i < N_CONTROL; i++) ctrl.push(new THREE.Vector3());
+    const curve = new THREE.CatmullRomCurve3(ctrl, false, 'catmullrom', 0.6);
+
+    const tubeGeo = new THREE.TubeGeometry(curve, this.SEG, 0.06, this.RAD_SEG, false);
+    const mat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      uniforms: {
+        uTime: { value: 0 },
+        uLife: { value: 1 },        // 0..1
+        uIntensity: { value: 1 },
+        uColorCore: { value: COLORS.leadA.clone() },
+        uColorEdge: { value: COLORS.leadB.clone() },
+      },
+      vertexShader: /* glsl */`
+        varying vec2 vUv; varying vec3 vN; varying vec3 vView;
+        void main() {
+          vUv = uv;
+          vN = normalize(normalMatrix * normal);
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          vView = normalize(-mv.xyz);
+          gl_Position = projectionMatrix * mv;
+        }
+      `,
+      fragmentShader: /* glsl */`
+        uniform float uTime; uniform float uLife; uniform float uIntensity;
+        uniform vec3 uColorCore; uniform vec3 uColorEdge;
+        varying vec2 vUv; varying vec3 vN; varying vec3 vView;
+        void main() {
+          // u runs along the tube length, v around the radius
+          float along = vUv.x;
+          float around = vUv.y;
+          // bright streaks travelling along the ribbon
+          float streak = 0.5 + 0.5 * sin(along * 22.0 - uTime * 6.0);
+          // bright "head" at the leading edge of the ribbon, fades back
+          float head = smoothstep(1.0 - 0.18, 1.0, along);
+          // fresnel-ish edge glow
+          float edge = pow(1.0 - max(dot(vN, vView), 0.0), 2.2);
+          // body color: white-gold core to gold edge
+          vec3 col = mix(uColorEdge, uColorCore, smoothstep(0.4, 0.6, around));
+          col = mix(col, uColorCore * 1.2, head);
+          col *= (0.6 + 0.5 * streak) + edge * 0.8;
+          // alpha: stronger at head, fades along ribbon, fades with life
+          float lifeFade = pow(1.0 - uLife, 1.2);
+          float a = (0.25 + 0.55 * head + 0.3 * edge) * lifeFade * uIntensity;
+          // taper the very tail
+          a *= smoothstep(0.0, 0.06, along);
+          gl_FragColor = vec4(col * a * 1.6, a);
+        }
+      `,
+    });
+    const mesh = new THREE.Mesh(tubeGeo, mat);
+    mesh.visible = false;
+
+    // a bright "head sprite" at the tip of the ribbon — a star with corona
+    const headGeo = new THREE.PlaneGeometry(2.0, 2.0);
+    const headMat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      uniforms: { uIntensity: { value: 0 }, uColor: { value: COLORS.leadA.clone() } },
+      vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: `
+        uniform float uIntensity; uniform vec3 uColor; varying vec2 vUv;
+        void main() {
+          vec2 p = vUv - 0.5; float d = length(p) * 2.0;
+          // tight core + soft outer halo + faint cross spike
+          float core = exp(-d * 7.5);
+          float halo = exp(-d * 1.4) * 0.32;
+          float spike = (exp(-abs(p.x) * 80.0) + exp(-abs(p.y) * 80.0))
+                       * exp(-d * 1.2) * 0.35;
+          float a = (core + halo + spike) * uIntensity;
+          // hot white core bleeding to warm gold
+          vec3 col = mix(uColor, vec3(1.0, 0.98, 0.88), pow(core, 0.5));
+          gl_FragColor = vec4(col * a * 2.2, a);
+        }
+      `,
+    });
+    const head = new THREE.Mesh(headGeo, headMat);
+    head.visible = false;
+
+    this.group.add(mesh);
+    this.group.add(head);
+
+    // baseCtrl holds the original curve; ctrl is recomputed each frame from
+    // base + a time-varying wobble offset so wobble doesn't accumulate.
+    const baseCtrl = [];
+    for (let i = 0; i < N_CONTROL; i++) baseCtrl.push(new THREE.Vector3());
+
+    return {
+      mesh, mat, head, headMat, curve, ctrl, baseCtrl, N_CONTROL,
+      active: false, t0: 0, duration: 1.5, intensity: 1, life: 1,
+      pitch01: 0.5, basePitch: 0,
+      // a wandering origin per ribbon for variety
+      seed: Math.random() * Math.PI * 2,
+    };
+  }
+
+  _rebuildTube(r) {
+    // dispose old geometry (tube geometry can't be cheaply mutated after creation)
+    r.mesh.geometry.dispose();
+    r.curve.points = r.ctrl;
+    r.mesh.geometry = new THREE.TubeGeometry(
+      r.curve, this.SEG,
+      0.05 + r.intensity * 0.07, this.RAD_SEG, false
+    );
+  }
+
+  trigger(velocity, midiNote) {
+    const r = this.ribbons[this.rIdx];
+    this.rIdx = (this.rIdx + 1) % this.MAX_RIBBONS;
+    r.active = true;
+    r.t0 = performance.now() * 0.001;
+    r.duration = 1.6 + (1.0 - velocity) * 0.7;
+    r.intensity = 0.6 + velocity * 0.7;
+    r.pitch01 = clamp01((midiNote - 55) / 36);  // G3..G6 roughly
+    r.basePitch = midiNote;
+    r.seed = Math.random() * Math.PI * 2;
+    r.life = 0;
+
+    // craft an expressive curve through space — a wide arc with subtle wobble
+    const apexY = lerp(-1.0, 4.5, r.pitch01);
+    const dir = Math.random() < 0.5 ? -1 : 1;
+    for (let i = 0; i < r.N_CONTROL; i++) {
+      const t = i / (r.N_CONTROL - 1);
+      // s-curve sweep from one side, arcing through apex, then back
+      const x = lerp(-2.5, 2.5, t) * dir + Math.sin(t * Math.PI * 2 + r.seed) * 0.4;
+      const y = lerp(-1.0, apexY, easeInOutSine(t)) - Math.pow(t - 0.5, 2) * apexY * 0.6 + Math.sin(t * 5.0 + r.seed) * 0.18;
+      const z = Math.sin(t * Math.PI + r.seed) * 1.4 - 0.4;
+      r.baseCtrl[i].set(x, y, z);
+      r.ctrl[i].copy(r.baseCtrl[i]);
+    }
+    this._rebuildTube(r);
+
+    r.mesh.visible = true;
+    r.head.visible = true;
+    r.mat.uniforms.uIntensity.value = r.intensity;
+    r.mat.uniforms.uLife.value = 0;
+    r.headMat.uniforms.uIntensity.value = r.intensity * 1.2;
+
+    this.env.trigger(0.5 + velocity * 0.7);
+  }
+
+  update(dt, time) {
+    const e = this.env.update(dt);
+    this.spark.material.uniforms.uEnergy.value = e;
+    this.spark.lookAt(camera.position);
+
+    for (const r of this.ribbons) {
+      if (!r.active) continue;
+      const age = (time - r.t0) / r.duration;
+      r.life = age;
+      r.mat.uniforms.uTime.value = time;
+      r.mat.uniforms.uLife.value = age;
+
+      // recompute ctrl = baseCtrl + time-varying wobble; this keeps the
+      // wobble bounded and ensures the ribbon doesn't drift out of frame.
+      for (let i = 0; i < r.N_CONTROL; i++) {
+        const t = i / (r.N_CONTROL - 1);
+        const decay = (1 - age);
+        const wx = Math.sin(time * 1.7 + t * 6.0 + r.seed) * 0.18 * decay;
+        const wy = Math.cos(time * 1.3 + t * 5.0 + r.seed) * 0.12 * decay;
+        const wz = Math.sin(time * 1.1 + t * 4.0 + r.seed * 0.7) * 0.15 * decay;
+        r.ctrl[i].set(
+          r.baseCtrl[i].x + wx,
+          r.baseCtrl[i].y + wy,
+          r.baseCtrl[i].z + wz
+        );
+      }
+      // we rebuild the tube geometry every frame for fluid motion (cost is acceptable
+      // because there are only up to MAX_RIBBONS active at once)
+      this._rebuildTube(r);
+
+      // head sprite at the leading curve point
+      const tip = r.ctrl[r.N_CONTROL - 1];
+      r.head.position.copy(tip);
+      r.head.lookAt(camera.position);
+      r.headMat.uniforms.uIntensity.value = Math.sin(Math.PI * Math.min(1, age * 1.4)) * r.intensity * 1.3;
+
+      if (age >= 1) {
+        r.active = false;
+        r.mesh.visible = false;
+        r.head.visible = false;
+      }
+    }
+
+    // gentle group sway
+    this.group.position.y = POSITIONS.lead.y + Math.sin(time * 0.4) * 0.10;
+
+    return e;
+  }
+}
+
+// ============================================================================
+// 4. instrument manager + MIDI routing + Tone.js playback
+// ============================================================================
+const drums  = new DrumsVisual();
+const bass   = new BassVisual();
+const melody = new MelodyVisual();
+const pads   = new PadsVisual();
+const lead   = new LeadVisual();
+
+scene.add(drums.group);
+scene.add(bass.group);
+scene.add(melody.group);
+scene.add(pads.group);
+scene.add(lead.group);
+
+// expose for debugging
+window.__viz = { THREE, scene, camera, renderer, drums, bass, melody, pads, lead };
+
+// ---- track-to-instrument routing -----------------------------------------
+// Heuristics: prefer explicit channel match (channel 10 -> drums, etc.), then
+// fall back to track name keywords, then fall back to pitch range.
+function classifyTrack(track, idx, total) {
+  const name = (track.name || '').toLowerCase();
+  // channel 10 (or "is drum" flag in @tonejs/midi) is the GM percussion bus
+  const ch = (track.channel != null) ? (track.channel + 1) : 0;
+  if (track.instrument && track.instrument.percussion) return 'drums';
+  if (ch === 10) return 'drums';
+
+  if (/(kick|snare|hat|drum|perc|kit)/.test(name)) return 'drums';
+  if (/(bass)/.test(name)) return 'bass';
+  if (/(lead|solo)/.test(name)) return 'lead';
+  if (/(pad|string|choir|atmos)/.test(name)) return 'pads';
+  if (/(mel|piano|guitar|synth|pluck|arp)/.test(name)) return 'melody';
+
+  // pitch-range fallback — average note pitch across the track
+  if (track.notes && track.notes.length) {
+    let sum = 0;
+    for (const n of track.notes) sum += n.midi;
+    const avg = sum / track.notes.length;
+    if (avg < 48) return 'bass';
+    if (avg > 72) return 'lead';
+    return 'melody';
+  }
+  // last resort: distribute by index
+  return ['melody', 'pads', 'lead', 'bass'][idx % 4];
+}
+
+function classifyDrumNote(midi) {
+  if (GM_KICK.has(midi)) return 'kick';
+  if (GM_SNARE.has(midi)) return 'snare';
+  if (GM_HAT.has(midi)) return 'hat';
+  // unknowns: route low to kick, high to hat, mid to snare
+  if (midi <= 41) return 'kick';
+  if (midi >= 47) return 'hat';
+  return 'snare';
+}
+
+// ---- player state --------------------------------------------------------
+const player = {
+  midi: null,
+  routedTracks: [],     // { track, role }
+  synths: { drums: null, bass: null, melody: null, pads: null, lead: null },
+  parts: [],            // Tone.Part[] (one per track)
+  duration: 0,
+  state: 'idle',        // idle | ready | playing | paused
+  startedAt: 0,         // Tone.now() when started
+  pausedOffset: 0,      // seconds into song when last paused
+  sustainLevels: { bass: 0, pads: 0 },
+};
+
+function disposePlayer() {
+  for (const p of player.parts) p.dispose();
+  player.parts = [];
+  for (const k of Object.keys(player.synths)) {
+    if (player.synths[k]) {
+      try { player.synths[k].dispose(); } catch (_) {}
+      player.synths[k] = null;
+    }
+  }
+  Tone.Transport.stop();
+  Tone.Transport.cancel(0);
+  Tone.Transport.position = 0;
+}
+
+// build a small set of synths so loaded MIDI actually makes sound; each is
+// tuned for its visual role.
+function buildSynths() {
+  const masterReverb = new Tone.Reverb({ decay: 5.5, wet: 0.32 }).toDestination();
+  const masterComp = new Tone.Compressor(-18, 3).connect(masterReverb);
+
+  // drums: simple membrane + noise + metal
+  const kick = new Tone.MembraneSynth({
+    pitchDecay: 0.05, octaves: 6, oscillator: { type: 'sine' },
+    envelope: { attack: 0.001, decay: 0.4, sustain: 0.01, release: 1.0, attackCurve: 'exponential' }
+  }).connect(masterComp);
+  const snare = new Tone.NoiseSynth({
+    noise: { type: 'white' },
+    envelope: { attack: 0.002, decay: 0.18, sustain: 0 }
+  }).connect(masterComp);
+  const hat = new Tone.MetalSynth({
+    frequency: 250, envelope: { attack: 0.001, decay: 0.08, release: 0.02 },
+    harmonicity: 5.1, modulationIndex: 32, resonance: 4000, octaves: 1.5
+  }).connect(masterComp);
+  hat.volume.value = -22;
+  snare.volume.value = -12;
+  player.synths.drums = { kick, snare, hat, _bus: masterComp };
+
+  player.synths.bass = new Tone.MonoSynth({
+    oscillator: { type: 'sawtooth' },
+    filter: { Q: 1.4, type: 'lowpass', rolloff: -24 },
+    envelope: { attack: 0.02, decay: 0.25, sustain: 0.55, release: 0.6 },
+    filterEnvelope: { attack: 0.02, decay: 0.18, sustain: 0.5, release: 0.4, baseFrequency: 90, octaves: 3.2 }
+  }).connect(masterComp);
+  player.synths.bass.volume.value = -8;
+
+  player.synths.melody = new Tone.PolySynth(Tone.Synth, {
+    oscillator: { type: 'triangle' },
+    envelope: { attack: 0.012, decay: 0.18, sustain: 0.5, release: 0.6 }
+  }).connect(masterComp);
+  player.synths.melody.volume.value = -12;
+
+  player.synths.pads = new Tone.PolySynth(Tone.Synth, {
+    oscillator: { type: 'sine' },
+    envelope: { attack: 0.6, decay: 1.5, sustain: 0.7, release: 2.0 }
+  }).connect(masterComp);
+  player.synths.pads.volume.value = -16;
+
+  player.synths.lead = new Tone.PolySynth(Tone.Synth, {
+    oscillator: { type: 'sawtooth' },
+    envelope: { attack: 0.005, decay: 0.18, sustain: 0.55, release: 0.5 }
+  }).connect(masterComp);
+  player.synths.lead.volume.value = -14;
+}
+
+function fireVisual(role, note) {
+  const v = note.velocity ?? 0.8;
+  const m = note.midi;
+  if (role === 'drums') {
+    const kind = classifyDrumNote(m);
+    if (kind === 'kick')  drums.triggerKick(v);
+    if (kind === 'snare') drums.triggerSnare(v);
+    if (kind === 'hat')   drums.triggerHat(v);
+  } else if (role === 'bass')   { bass.trigger(v, m); }
+  else if (role === 'melody') { melody.trigger(v, m); }
+  else if (role === 'pads')   { pads.trigger(v); }
+  else if (role === 'lead')   { lead.trigger(v, m); }
+}
+
+function playSound(role, note, time) {
+  const dur = Math.max(0.02, note.duration);
+  const v = note.velocity ?? 0.8;
+  const s = player.synths[role];
+  if (!s) return;
+  if (role === 'drums') {
+    const kind = classifyDrumNote(note.midi);
+    if (kind === 'kick')  s.kick.triggerAttackRelease('C1', '8n', time, v);
+    if (kind === 'snare') s.snare.triggerAttackRelease('16n', time, v);
+    if (kind === 'hat')   s.hat.triggerAttackRelease('32n', time, v * 0.7);
+  } else if (role === 'bass') {
+    s.triggerAttackRelease(note.name, dur, time, v);
+  } else {
+    s.triggerAttackRelease(note.name, dur, time, v);
+  }
+}
+
+async function loadMidiFromArrayBuffer(buf) {
+  const midi = new Midi(buf);
+  player.midi = midi;
+  disposePlayer();
+  buildSynths();
+
+  // route tracks
+  const routed = [];
+  midi.tracks.forEach((tr, i) => {
+    if (!tr.notes || !tr.notes.length) return;
+    const role = classifyTrack(tr, i, midi.tracks.length);
+    routed.push({ track: tr, role });
+  });
+  player.routedTracks = routed;
+  player.duration = midi.duration;
+
+  // build a Part per track that triggers both visual + sound
+  for (const { track, role } of routed) {
+    const events = track.notes.map(n => [n.time, n]);
+    const part = new Tone.Part((time, note) => {
+      // visual triggers run on the AudioContext clock; schedule the visual
+      // callback via Tone.Draw so it lands close to the correct frame
+      Tone.Draw.schedule(() => fireVisual(role, note), time);
+      playSound(role, note, time);
+      // For sustained roles, push the envelope's sustain target during the note
+      if (role === 'bass') {
+        Tone.Draw.schedule(() => bass.setSustain(0.4 + (note.velocity || 0.6) * 0.5), time);
+        Tone.Draw.schedule(() => bass.setSustain(0), time + Math.max(0.05, note.duration) * 0.95);
+      }
+      if (role === 'pads') {
+        Tone.Draw.schedule(() => pads.setSustain(0.3 + (note.velocity || 0.6) * 0.5), time);
+        Tone.Draw.schedule(() => pads.setSustain(0), time + Math.max(0.05, note.duration) * 0.95);
+      }
+    }, events);
+    part.start(0);
+    player.parts.push(part);
+  }
+
+  // populate legend with note counts
+  const counts = { drums: 0, bass: 0, melody: 0, pads: 0, lead: 0 };
+  for (const { track, role } of routed) counts[role] += track.notes.length;
+  for (const role of Object.keys(counts)) {
+    const el = document.querySelector(`[data-track="${role}"]`);
+    if (el) el.textContent = counts[role] ? `${counts[role]} notes` : '—';
+  }
+
+  player.state = 'ready';
+  player.pausedOffset = 0;
+  setTransportVisible(true);
+  showToast(`${midi.name || 'Loaded'} · ${routed.length} tracks · ${formatTime(midi.duration)}`);
+}
+
+async function startPlayback() {
+  if (player.state === 'idle') return;
+  await Tone.start();
+  if (player.state === 'paused') {
+    Tone.Transport.start();
+  } else {
+    Tone.Transport.stop();
+    Tone.Transport.position = 0;
+    Tone.Transport.start();
+  }
+  player.state = 'playing';
+  updatePlayIcon();
+}
+
+function pausePlayback() {
+  if (player.state !== 'playing') return;
+  Tone.Transport.pause();
+  player.state = 'paused';
+  updatePlayIcon();
+}
+
+function stopPlayback() {
+  if (player.state === 'idle') return;
+  Tone.Transport.stop();
+  Tone.Transport.position = 0;
+  player.state = 'ready';
+  player.pausedOffset = 0;
+  updatePlayIcon();
+}
+
+function seekTo(seconds) {
+  if (player.state === 'idle') return;
+  const wasPlaying = player.state === 'playing';
+  Tone.Transport.seconds = seconds;
+  if (wasPlaying) {
+    // restart parts at new position
+    Tone.Transport.start();
+  }
+}
+
+// ============================================================================
+// 5. UI binding + animation loop
+// ============================================================================
+const ui = {
+  drop:      document.getElementById('drop'),
+  hint:      document.getElementById('hint'),
+  legend:    document.getElementById('legend'),
+  transport: document.getElementById('transport'),
+  btnPlay:   document.getElementById('btn-play'),
+  btnStop:   document.getElementById('btn-stop'),
+  icPlay:    document.getElementById('ic-play'),
+  seek:      document.getElementById('seek'),
+  time:      document.getElementById('time'),
+  toast:     document.getElementById('toast'),
+  picker:    document.getElementById('filepicker'),
+};
+
+function showToast(msg, kind = 'ok') {
+  ui.toast.textContent = msg;
+  ui.toast.classList.add('show');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => ui.toast.classList.remove('show'), 2400);
+}
+
+function setTransportVisible(on) {
+  ui.transport.classList.toggle('show', on);
+  ui.legend.classList.toggle('show', on);
+  if (on) ui.hint.style.opacity = '0';
+}
+
+function formatTime(sec) {
+  if (!isFinite(sec)) return '0:00';
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s.toString().padStart(2,'0')}`;
+}
+
+const ICON_PLAY  = '<path d="M4 3l9 5-9 5V3z"/>';
+const ICON_PAUSE = '<path d="M4 3h3v10H4zM9 3h3v10H9z"/>';
+function updatePlayIcon() {
+  ui.icPlay.innerHTML = (player.state === 'playing') ? ICON_PAUSE : ICON_PLAY;
+}
+
+// drag and drop ------------------------------------------------------------
+let dragDepth = 0;
+function showDrop(on) {
+  ui.drop.classList.toggle('show', on);
+  ui.drop.classList.toggle('armed', on);
+}
+window.addEventListener('dragenter', e => {
+  e.preventDefault();
+  dragDepth++;
+  showDrop(true);
+});
+window.addEventListener('dragleave', e => {
+  e.preventDefault();
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) showDrop(false);
+});
+window.addEventListener('dragover', e => { e.preventDefault(); });
+window.addEventListener('drop', async e => {
+  e.preventDefault();
+  dragDepth = 0;
+  showDrop(false);
+  const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (!file) return;
+  if (!/\.midi?$/i.test(file.name)) {
+    showToast('Please drop a .mid file');
+    return;
+  }
+  try {
+    const buf = await file.arrayBuffer();
+    await loadMidiFromArrayBuffer(buf);
+  } catch (err) {
+    console.error(err);
+    showToast('Could not parse MIDI');
+  }
+});
+
+// click drop ring to open picker; same for "O" key
+ui.drop.addEventListener('click', () => ui.picker.click());
+window.addEventListener('keydown', e => {
+  if (e.key === 'o' || e.key === 'O') ui.picker.click();
+  if (e.key === ' ') {
+    e.preventDefault();
+    if (player.state === 'playing') pausePlayback();
+    else if (player.state === 'paused' || player.state === 'ready') startPlayback();
+  }
+});
+ui.picker.addEventListener('change', async e => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  const buf = await f.arrayBuffer();
+  try { await loadMidiFromArrayBuffer(buf); }
+  catch (err) { console.error(err); showToast('Could not parse MIDI'); }
+});
+
+ui.btnPlay.addEventListener('click', () => {
+  if (player.state === 'playing') pausePlayback();
+  else startPlayback();
+});
+ui.btnStop.addEventListener('click', stopPlayback);
+ui.seek.addEventListener('input', () => {
+  const dur = player.duration || 1;
+  const t = (parseFloat(ui.seek.value) / 1000) * dur;
+  seekTo(t);
+});
+
+// ---- animation loop ------------------------------------------------------
+const clock = new THREE.Clock();
+let elapsed = 0;
+function tick() {
+  const dt = Math.min(0.1, clock.getDelta());
+  elapsed += dt;
+
+  // gentle idle ambience so the scene breathes even without MIDI:
+  // pads shimmer slowly, bass sways. We bias their envelopes upward by a
+  // slow LFO so the visuals don't sit dead at zero.
+  const idleA = 0.18 + 0.10 * Math.sin(elapsed * 0.27);     // 0.08..0.28
+  const idleB = 0.12 + 0.08 * Math.sin(elapsed * 0.41 + 1); // 0.04..0.20
+  if (player.state !== 'playing') {
+    pads.setSustain(idleA);
+    bass.setSustain(idleB * 0.5);
+  }
+
+  // update each visual; collect activity totals for camera drift
+  const drumE = drums.update(dt, elapsed);
+  const bassE = bass.update(dt, elapsed);
+  const melE  = melody.update(dt, elapsed);
+  const padE  = pads.update(dt, elapsed);
+  const leadE = lead.update(dt, elapsed);
+  const energy = clamp01(drumE.kick * 0.7 + drumE.snare * 0.3 + bassE * 0.6 + melE * 0.4 + padE * 0.4 + leadE * 0.5);
+
+  starField.mat.uniforms.uTime.value = elapsed;
+  cameraDrift.update(elapsed, energy);
+
+  // bloom strength breathes very subtly with energy so big moments feel bigger
+  bloom.strength = 1.05 + energy * 0.55;
+
+  // transport UI
+  if (player.state === 'playing' || player.state === 'paused') {
+    const t = Tone.Transport.seconds;
+    if (player.state === 'playing' && t >= player.duration) {
+      stopPlayback();
+    }
+    ui.time.textContent = `${formatTime(t)} / ${formatTime(player.duration)}`;
+    const pct = clamp01(t / Math.max(0.001, player.duration));
+    ui.seek.value = String(Math.round(pct * 1000));
+    ui.seek.style.setProperty('--seek', (pct * 100).toFixed(2) + '%');
+  }
+
+  composer.render(dt);
+  requestAnimationFrame(tick);
+}
+
+// initial overlay state: show the drop ring softly until a MIDI is loaded
+ui.drop.classList.add('show');
+requestAnimationFrame(tick);
+
+</script>
+</body>
+</html>
