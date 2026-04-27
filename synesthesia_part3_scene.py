@@ -1,5 +1,5 @@
 # ============================================================================
-# SYNESTHESIA VISUALIZER — Part 3: Scene Composition & Output
+# SYNESTHESIA VISUALIZER - Part 3: Scene Composition & Output
 # ============================================================================
 # Paste this AFTER Parts 1 & 2. It builds the camera, lights, render
 # pipeline, post-processing, transport controls, and fullscreen output.
@@ -8,121 +8,147 @@
 BASE = '/project1/synesthesia'
 base = op(BASE)
 if not base:
-    raise RuntimeError('Run Parts 1 & 2 first — container not found')
+    raise RuntimeError('Run Parts 1 & 2 first - container not found')
+
+def _setpar(o, name, value):
+    """Set a parameter if it exists, swallowing menu/value mismatches."""
+    p = getattr(o.par, name, None)
+    if p is None:
+        return False
+    try:
+        p.val = value
+        return True
+    except Exception:
+        try:
+            setattr(o.par, name, value)
+            return True
+        except Exception:
+            return False
 
 # ---------------------------------------------------------------------------
-# 1. CAMERA — orbiting with look-at
+# 1. CAMERA TARGET - a Null COMP at world origin so the orbit camera
+#    has a stable look-at point. Without this, the camera orbits but
+#    never rotates to face the geometry, giving a black render.
 # ---------------------------------------------------------------------------
-# The camera slowly orbits the origin so the viewer sees all geometry
-# from shifting angles. It always looks at the centre of the scene.
+target = base.create(nullCOMP, 'cam_target')
+target.nodeX = -150
+target.nodeY = -700
+target.par.tx = 0
+target.par.ty = 0
+target.par.tz = 0
+
+# ---------------------------------------------------------------------------
+# 2. CAMERA - orbiting with look-at
+# ---------------------------------------------------------------------------
 cam = base.create(cameraCOMP, 'cam_orbit')
 cam.nodeX = -300
 cam.nodeY = -700
 cam.par.tx = 0
 cam.par.ty = 1.0
 cam.par.tz = 5.0
-# Look-at target: the origin
-cam.par.lookatpath = ''  # we drive orbit via expressions below
 
-# Orbit expressions — slow circular path
-orbit_speed = base.create(constantCHOP, 'orbit_speed')
-orbit_speed.nodeX = -500
-orbit_speed.nodeY = -700
-orbit_speed.par.value0 = 0.04  # revolutions per second
+# Point the camera at the cam_target null on every cook.
+for pname in ('lookat', 'lookatpath'):
+    if hasattr(cam.par, pname):
+        try:
+            setattr(cam.par, pname, target.path)
+            break
+        except Exception:
+            continue
 
-cam.par.tx.expr = 'math.sin(me.time.seconds * 0.04 * 6.283) * 5.0'
+# Slow orbit driven by absTime so it keeps moving while the timer is paused.
+cam.par.tx.expr = 'math.sin(absTime.seconds * 0.04 * 6.283) * 5.0'
 cam.par.tx.mode = ParMode.EXPRESSION
-cam.par.tz.expr = 'math.cos(me.time.seconds * 0.04 * 6.283) * 5.0'
+cam.par.tz.expr = 'math.cos(absTime.seconds * 0.04 * 6.283) * 5.0'
 cam.par.tz.mode = ParMode.EXPRESSION
-cam.par.ty.expr = '1.5 + math.sin(me.time.seconds * 0.02) * 0.5'
+cam.par.ty.expr = '1.5 + math.sin(absTime.seconds * 0.02) * 0.5'
 cam.par.ty.mode = ParMode.EXPRESSION
-print('[Part 3] Camera — orbiting with look-at')
+print('[Part 3] Camera - orbiting with look-at on cam_target')
 
 # ---------------------------------------------------------------------------
-# 2. THREE-POINT LIGHTING
+# 3. THREE-POINT LIGHTING
 # ---------------------------------------------------------------------------
-# Key light: main directional, warm white
 key = base.create(lightCOMP, 'light_key')
 key.nodeX = -100
 key.nodeY = -700
 key.par.tx = 3
 key.par.ty = 4
 key.par.tz = 2
-key.par.dimmer = 1.2
-key.par.lightcolorr = 1.0
-key.par.lightcolorg = 0.95
-key.par.lightcolorb = 0.85
+_setpar(key, 'dimmer', 1.2)
+_setpar(key, 'lightcolorr', 1.0)
+_setpar(key, 'lightcolorg', 0.95)
+_setpar(key, 'lightcolorb', 0.85)
 
-# Fill light: soft blue from the side
 fill = base.create(lightCOMP, 'light_fill')
 fill.nodeX = 100
 fill.nodeY = -700
 fill.par.tx = -3
 fill.par.ty = 2
 fill.par.tz = -1
-fill.par.dimmer = 0.5
-fill.par.lightcolorr = 0.6
-fill.par.lightcolorg = 0.7
-fill.par.lightcolorb = 1.0
+_setpar(fill, 'dimmer', 0.5)
+_setpar(fill, 'lightcolorr', 0.6)
+_setpar(fill, 'lightcolorg', 0.7)
+_setpar(fill, 'lightcolorb', 1.0)
 
-# Rim/back light: highlights edges
 rim = base.create(lightCOMP, 'light_rim')
 rim.nodeX = 300
 rim.nodeY = -700
 rim.par.tx = 0
 rim.par.ty = -1
 rim.par.tz = -4
-rim.par.dimmer = 0.7
-rim.par.lightcolorr = 0.8
-rim.par.lightcolorg = 0.85
-rim.par.lightcolorb = 1.0
-print('[Part 3] 3-point lighting — key, fill, rim')
+_setpar(rim, 'dimmer', 0.7)
+_setpar(rim, 'lightcolorr', 0.8)
+_setpar(rim, 'lightcolorg', 0.85)
+_setpar(rim, 'lightcolorb', 1.0)
+print('[Part 3] 3-point lighting - key, fill, rim')
 
 # ---------------------------------------------------------------------------
-# 3. RENDER TOP — 1080p, 4x MSAA
+# 4. RENDER TOP - 1080p, 4x MSAA
 # ---------------------------------------------------------------------------
+# Geometry/Lights patterns must match only the relevant siblings -
+# "*" would also pull in cameras, materials, DATs, etc. and trip warnings.
 render = base.create(renderTOP, 'render_main')
 render.nodeX = 0
 render.nodeY = -900
 render.par.resolutionw = 1920
 render.par.resolutionh = 1080
-render.par.antialiasing = 4  # 4x MSAA
+_setpar(render, 'antialiasing', 4)
 render.par.camera = cam.path
-# Render all geometry in the container
-render.par.geometry = '*'
-render.par.lights = '*'
-print('[Part 3] Render TOP — 1920x1080, 4x MSAA')
+_setpar(render, 'geometry', '*_geo')
+_setpar(render, 'lights',   'light_*')
+print('[Part 3] Render TOP - 1920x1080, 4x MSAA, geometry=*_geo lights=light_*')
 
 # ---------------------------------------------------------------------------
-# 4. POST-PROCESSING: Bloom / Glow
+# 5. POST-PROCESSING: Bloom / Glow
 # ---------------------------------------------------------------------------
-# Bloom makes bright areas bleed light — essential for the glowing look.
+# Threshold first so only bright pixels bloom, then blur, then add back.
+bloom_thresh = base.create(levelTOP, 'bloom_threshold')
+bloom_thresh.nodeX = 200
+bloom_thresh.nodeY = -1000
+bloom_thresh.inputConnectors[0].connect(render)
+_setpar(bloom_thresh, 'blacklevel', 0.55)
+
 bloom_blur = base.create(blurTOP, 'bloom_blur')
 bloom_blur.nodeX = 200
 bloom_blur.nodeY = -900
-bloom_blur.inputConnectors[0].connect(render)
-bloom_blur.par.size = 20  # blur radius
+bloom_blur.inputConnectors[0].connect(bloom_thresh)
+_setpar(bloom_blur, 'size', 20)
 
-bloom_level = base.create(levelTOP, 'bloom_threshold')
-bloom_level.nodeX = 200
-bloom_level.nodeY = -1000
-bloom_level.inputConnectors[0].connect(bloom_blur)
-bloom_level.par.opacity = 0.45  # bloom intensity
-
-# Composite bloom back onto render
 bloom_comp = base.create(compositeTOP, 'bloom_comp')
 bloom_comp.nodeX = 400
 bloom_comp.nodeY = -900
 bloom_comp.inputConnectors[0].connect(render)
-bloom_comp.inputConnectors[1].connect(bloom_level)
-bloom_comp.par.operand = 0  # Add mode
+bloom_comp.inputConnectors[1].connect(bloom_blur)
+_setpar(bloom_comp, 'operand', 'add')
 print('[Part 3] Bloom / glow post-processing')
 
 # ---------------------------------------------------------------------------
-# 5. FEEDBACK TRAILS
+# 6. FEEDBACK TRAILS
 # ---------------------------------------------------------------------------
-# Feedback creates ghostly trails from previous frames — gives motion blur
-# and a dreamy afterimage effect.
+# Feedback creates ghostly trails from previous frames. The composite order
+# must be: trails on the bottom (input 0), current frame on top (input 1)
+# with "over" - that way the new frame shines through and old frames
+# fade out behind it.
 feedback = base.create(feedbackTOP, 'feedback')
 feedback.nodeX = 600
 feedback.nodeY = -900
@@ -131,70 +157,72 @@ fb_level = base.create(levelTOP, 'feedback_decay')
 fb_level.nodeX = 600
 fb_level.nodeY = -1000
 fb_level.inputConnectors[0].connect(feedback)
-fb_level.par.opacity = 0.88  # trail persistence (higher = longer trails)
+_setpar(fb_level, 'opacity', 0.88)
 
 fb_comp = base.create(compositeTOP, 'trail_comp')
 fb_comp.nodeX = 800
 fb_comp.nodeY = -900
-fb_comp.inputConnectors[0].connect(bloom_comp)
-fb_comp.inputConnectors[1].connect(fb_level)
-fb_comp.par.operand = 27  # Over mode
+fb_comp.inputConnectors[0].connect(fb_level)     # bg = faded previous
+fb_comp.inputConnectors[1].connect(bloom_comp)   # fg = current frame
+_setpar(fb_comp, 'operand', 'over')
 
 # Feed the composite back into feedback
 feedback.inputConnectors[0].connect(fb_comp)
 print('[Part 3] Feedback trails')
 
 # ---------------------------------------------------------------------------
-# 6. COLOUR GRADING
+# 7. COLOUR GRADING
 # ---------------------------------------------------------------------------
-# Subtle colour correction to unify the palette — slight teal in shadows,
-# warm highlights.
 grade = base.create(levelTOP, 'color_grade')
 grade.nodeX = 1000
 grade.nodeY = -900
 grade.inputConnectors[0].connect(fb_comp)
-grade.par.gamma1 = 0.95
-grade.par.gamma2 = 0.97
-grade.par.gamma3 = 1.02
-grade.par.contrast = 1.08
-grade.par.brightness1 = 1.02
+_setpar(grade, 'gamma1', 0.95)
+_setpar(grade, 'gamma2', 0.97)
+_setpar(grade, 'gamma3', 1.02)
+_setpar(grade, 'contrast', 1.08)
+_setpar(grade, 'brightness1', 1.02)
 print('[Part 3] Colour grading')
 
 # ---------------------------------------------------------------------------
-# 7. VIGNETTE — GLSL post-process
+# 8. VIGNETTE - GLSL post-process
 # ---------------------------------------------------------------------------
 vig_dat = base.create(textDAT, 'vignette_compute')
 vig_dat.nodeX = 1000
 vig_dat.nodeY = -1100
-vig_dat.text = '''// Vignette GLSL shader -- darkens edges for cinematic focus
-uniform float uStrength;
-out vec4 fragColor;
-void main(){
-    vec2 uv = vUV.st;
-    vec2 center = uv - 0.5;
-    float dist = length(center);
-    float strength = (uStrength > 0.0) ? uStrength : 0.55;
-    float vig = smoothstep(0.45, 0.75, dist);
-    vec4 col = texture(sTD2DInputs[0], uv);
-    col.rgb *= 1.0 - vig * strength;
-    fragColor = TDOutputSwizzle(col);
-}
-'''
+vig_dat.text = (
+    "// Vignette GLSL shader - darkens edges for cinematic focus\n"
+    "uniform float uStrength;\n"
+    "out vec4 fragColor;\n"
+    "void main(){\n"
+    "    vec2 uv = vUV.st;\n"
+    "    vec2 center = uv - 0.5;\n"
+    "    float dist = length(center);\n"
+    "    float strength = (uStrength > 0.0) ? uStrength : 0.55;\n"
+    "    float vig = smoothstep(0.45, 0.75, dist);\n"
+    "    vec4 col = texture(sTD2DInputs[0], uv);\n"
+    "    col.rgb *= 1.0 - vig * strength;\n"
+    "    fragColor = TDOutputSwizzle(col);\n"
+    "}\n"
+)
 
 vig_top = base.create(glslTOP, 'vignette')
 vig_top.nodeX = 1200
 vig_top.nodeY = -900
 vig_top.inputConnectors[0].connect(grade)
-if hasattr(vig_top.par, 'pixeldat'):
-    vig_top.par.pixeldat = vig_dat.path
-elif hasattr(vig_top.par, 'glslpixel'):
-    vig_top.par.glslpixel = vig_dat.path
-vig_top.par.resolutionw = 1920
-vig_top.par.resolutionh = 1080
+for pname in ('pixeldat', 'pixelshader', 'glslpixel', 'fragshader'):
+    if hasattr(vig_top.par, pname):
+        try:
+            setattr(vig_top.par, pname, vig_dat.path)
+            break
+        except Exception:
+            continue
+_setpar(vig_top, 'resolutionw', 1920)
+_setpar(vig_top, 'resolutionh', 1080)
 print('[Part 3] Vignette shader (vignette_compute)')
 
 # ---------------------------------------------------------------------------
-# 8. NULL TOP — final output reference
+# 9. NULL TOP - final output reference
 # ---------------------------------------------------------------------------
 final_null = base.create(nullTOP, 'OUT')
 final_null.nodeX = 1400
@@ -203,117 +231,121 @@ final_null.inputConnectors[0].connect(vig_top)
 print('[Part 3] Final output null: OUT')
 
 # ---------------------------------------------------------------------------
-# 9. WINDOW COMP — fullscreen output
+# 10. WINDOW COMP - fullscreen output
 # ---------------------------------------------------------------------------
 win = base.create(windowCOMP, 'window_out')
 win.nodeX = 1600
 win.nodeY = -900
-win.par.top = final_null.path
-win.par.winw = 1920
-win.par.winh = 1080
-win.par.borders = False  # borderless for clean fullscreen
-print('[Part 3] Window COMP — fullscreen output')
+_setpar(win, 'top', final_null.path)
+_setpar(win, 'winw', 1920)
+_setpar(win, 'winh', 1080)
+_setpar(win, 'borders', False)
+print('[Part 3] Window COMP - fullscreen output')
 
 # ---------------------------------------------------------------------------
-# 10. TRANSPORT CONTROLS — play / pause / restart / change file
+# 11. TRANSPORT CONTROLS - play / pause / restart / change file
 # ---------------------------------------------------------------------------
 transport_dat = base.create(textDAT, 'transport_controls')
-transport_dat.nodeX = -600
+transport_dat.nodeX = -800
 transport_dat.nodeY = -900
-transport_dat.text = '''# =====================================================
-# TRANSPORT CONTROLS
-# =====================================================
-# Importable helpers. Call from Textport, keyboard
-# callback, or any DAT:
-#   import transport_controls as tc
-#   tc.play()
-
-TIMER_PATH = '/project1/synesthesia/transport_timer'
-MIDI_PATH  = '/project1/synesthesia/midi_file_in'
-WIN_PATH   = '/project1/synesthesia/window_out'
-
-def _timer():
-    return op(TIMER_PATH)
-
-def play():
-    t = _timer()
-    if t is not None:
-        t.par.play = True
-
-def pause():
-    t = _timer()
-    if t is not None:
-        t.par.play = False
-
-def restart():
-    t = _timer()
-    if t is not None:
-        t.par.cue.pulse()
-
-def load_midi(path):
-    m = op(MIDI_PATH)
-    if m is not None:
-        m.par.file = path
-
-def fullscreen():
-    w = op(WIN_PATH)
-    if w is not None:
-        w.par.winopen.pulse()
-
-def windowed():
-    w = op(WIN_PATH)
-    if w is not None:
-        w.par.winclose.pulse()
-'''
+transport_dat.text = (
+    "# =====================================================\n"
+    "# TRANSPORT CONTROLS\n"
+    "# =====================================================\n"
+    "# Importable helpers. Call from Textport, keyboard\n"
+    "# callback, or any DAT:\n"
+    "#   import transport_controls as tc\n"
+    "#   tc.play()\n"
+    "\n"
+    "TIMER_PATH = '/project1/synesthesia/transport_timer'\n"
+    "MIDI_PATH  = '/project1/synesthesia/midi_file_in'\n"
+    "WIN_PATH   = '/project1/synesthesia/window_out'\n"
+    "\n"
+    "def _timer():\n"
+    "    return op(TIMER_PATH)\n"
+    "\n"
+    "def play():\n"
+    "    t = _timer()\n"
+    "    if t is not None:\n"
+    "        t.par.play = True\n"
+    "\n"
+    "def pause():\n"
+    "    t = _timer()\n"
+    "    if t is not None:\n"
+    "        t.par.play = False\n"
+    "\n"
+    "def restart():\n"
+    "    t = _timer()\n"
+    "    if t is not None:\n"
+    "        t.par.cue.pulse()\n"
+    "\n"
+    "def load_midi(path):\n"
+    "    m = op(MIDI_PATH)\n"
+    "    if m is not None:\n"
+    "        m.par.file = path\n"
+    "\n"
+    "def fullscreen():\n"
+    "    w = op(WIN_PATH)\n"
+    "    if w is not None:\n"
+    "        w.par.winopen.pulse()\n"
+    "\n"
+    "def windowed():\n"
+    "    w = op(WIN_PATH)\n"
+    "    if w is not None:\n"
+    "        w.par.winclose.pulse()\n"
+)
 print('[Part 3] Transport control helpers saved')
 
 # ---------------------------------------------------------------------------
-# 11. PLAY / PAUSE KEYBOARD SCRIPT
+# 12. PLAY / PAUSE KEYBOARD SCRIPT
 # ---------------------------------------------------------------------------
 kb_dat = base.create(textDAT, 'keyboard_shortcuts')
-kb_dat.nodeX = -600
+kb_dat.nodeX = -800
 kb_dat.nodeY = -1050
-kb_dat.text = '''# Keyboard In DAT callbacks
-# Wired to keyboard_in DAT (created below). Edit freely.
+kb_dat.text = (
+    "# Keyboard In DAT callbacks\n"
+    "# Wired to keyboard_in DAT (created below). Edit freely.\n"
+    "\n"
+    "def onKey(dat, key, state):\n"
+    "    # state == True on key-down, False on key-up\n"
+    "    if not state:\n"
+    "        return\n"
+    "    timer = op('/project1/synesthesia/transport_timer')\n"
+    "    if timer is None:\n"
+    "        return\n"
+    "    if key == 'space':\n"
+    "        timer.par.play = not bool(timer.par.play.eval())\n"
+    "    elif key == 'r':\n"
+    "        timer.par.cue.pulse()\n"
+    "    elif key == 'f':\n"
+    "        win = op('/project1/synesthesia/window_out')\n"
+    "        if win is not None:\n"
+    "            win.par.winopen.pulse()\n"
+    "    elif key == 'esc':\n"
+    "        win = op('/project1/synesthesia/window_out')\n"
+    "        if win is not None:\n"
+    "            win.par.winclose.pulse()\n"
+    "    return\n"
+)
 
-def onKey(dat, key, state):
-    # state == True on key-down, False on key-up
-    if not state:
-        return
-    timer = op('/project1/synesthesia/transport_timer')
-    if timer is None:
-        return
-    if key == 'space':
-        timer.par.play = not bool(timer.par.play.eval())
-    elif key == 'r':
-        timer.par.cue.pulse()
-    elif key == 'f':
-        win = op('/project1/synesthesia/window_out')
-        if win is not None:
-            win.par.winopen.pulse()
-    elif key == 'esc':
-        win = op('/project1/synesthesia/window_out')
-        if win is not None:
-            win.par.winclose.pulse()
-    return
-'''
-
-# Keyboard In DAT that fires the callback
 kb_in = base.create(keyboardinDAT, 'keyboard_in')
-kb_in.nodeX = -800
+kb_in.nodeX = -1000
 kb_in.nodeY = -1050
-if hasattr(kb_in.par, 'callbacks'):
-    kb_in.par.callbacks = kb_dat.path
-elif hasattr(kb_in.par, 'callbackdat'):
-    kb_in.par.callbackdat = kb_dat.path
+for pname in ('callbacks', 'callbackdat'):
+    if hasattr(kb_in.par, pname):
+        try:
+            setattr(kb_in.par, pname, kb_dat.path)
+            break
+        except Exception:
+            continue
 print('[Part 3] Keyboard shortcuts wired (space=play, r=restart, f=fullscreen, esc=close)')
 
 # ---------------------------------------------------------------------------
-# DONE — all three parts complete!
+# DONE - all three parts complete!
 # ---------------------------------------------------------------------------
 print('')
 print('=' * 60)
-print(' PART 3 COMPLETE — Scene & Output')
+print(' PART 3 COMPLETE - Scene & Output')
 print('=' * 60)
 print('')
 print(' YOUR SYNESTHESIA VISUALIZER IS READY!')
