@@ -1,8 +1,13 @@
 # ============================================================================
 # SYNESTHESIA VISUALIZER  -  single-file builder
 # ----------------------------------------------------------------------------
-# Paste the entire contents of this file into TouchDesigner's Textport
-# (Alt + P) and press Enter. It builds /project1/synesthesia from scratch.
+# Run from TouchDesigner's Textport (Alt + P):
+#
+#   exec(open(r'C:\path\to\synesthesia_build.py').read())
+#
+# It builds /project1/synesthesia from scratch, configures midi_in for FILE
+# playback (MIDI_FILE_PATH below), starts the timeline, and the geometry
+# starts pulsing within seconds. No manual steps after this.
 #
 # Strategy
 # --------
@@ -10,7 +15,7 @@
 #    one camera, one light, one render. That validates the whole chain.
 # 2. Then add the remaining four instruments one at a time. Each is wrapped
 #    in its own try/except so a single failure does not stop the build.
-# 3. Print a status line for every step and a summary report at the end.
+# 3. Start playback. Print a status line for every step and a final report.
 #
 # Every parameter name and method below is taken from the official
 # TouchDesigner documentation:
@@ -31,6 +36,9 @@
 import traceback
 
 BASE_PATH = '/project1/synesthesia'
+
+# MIDI file to play. Edit this if you want a different .mid.
+MIDI_FILE_PATH = r'C:\Users\linds\OneDrive\Documents\Synesthesia\Deadmau5 and Kaskade - I Remember.mid'
 
 LAG_RISE = 0.02   # attack smoothing on the activity CHOPs (seconds)
 LAG_FALL = 0.30   # release smoothing on the activity CHOPs (seconds)
@@ -211,12 +219,17 @@ def build_visual(base, name, sop_key, color, pos, pulse, x_offset):
     geo = replace(base, geometryCOMP, name + '_geo')
     geo.nodeX = x_offset
     geo.nodeY = 0
-    setpar(geo, 'tx', pos[0])
-    setpar(geo, 'ty', pos[1])
-    setpar(geo, 'tz', pos[2])
 
     activity_path = "%s/activity_%s" % (BASE_PATH, name)
-    scale_expr = "1.0 + op('%s')['%s'] * %s" % (activity_path, name, pulse)
+    activity_ref = "op('%s')['%s']" % (activity_path, name)
+
+    # Position: rest pose from `pos`, plus a small activity-driven bob/sway
+    # so the geometry visibly moves on every MIDI hit (not just scales/glows).
+    expr_set(geo, 'tx', "%s + %s * 0.25 * math.sin(absTime.seconds * 2.1)" % (pos[0], activity_ref))
+    expr_set(geo, 'ty', "%s + %s * 0.60" % (pos[1], activity_ref))
+    expr_set(geo, 'tz', "%s + %s * 0.25 * math.cos(absTime.seconds * 1.7)" % (pos[2], activity_ref))
+
+    scale_expr = "1.0 + %s * %s" % (activity_ref, pulse)
     expr_set(geo, 'sx', scale_expr)
     expr_set(geo, 'sy', scale_expr)
     expr_set(geo, 'sz', scale_expr)
@@ -247,10 +260,9 @@ def build_visual(base, name, sop_key, color, pos, pulse, x_offset):
     setpar(mat, 'specb', 0.6)
     setpar(mat, 'shininess', 60)
 
-    glow = "op('%s')['%s']" % (activity_path, name)
-    expr_set(mat, 'emitr', "%s * %s" % (color[0], glow))
-    expr_set(mat, 'emitg', "%s * %s" % (color[1], glow))
-    expr_set(mat, 'emitb', "%s * %s" % (color[2], glow))
+    expr_set(mat, 'emitr', "%s * %s" % (color[0], activity_ref))
+    expr_set(mat, 'emitg', "%s * %s" % (color[1], activity_ref))
+    expr_set(mat, 'emitb', "%s * %s" % (color[2], activity_ref))
 
     setpar(geo, 'material', mat.path)
     return geo, mat
@@ -281,14 +293,19 @@ with step('1. create container at ' + BASE_PATH):
 
 midi = None
 if base is not None:
-    with step('2. create midi_in (live MIDI In CHOP)'):
+    with step('2. create midi_in (MIDI In CHOP, file mode)'):
         midi = base.create(midiinCHOP, 'midi_in')
         midi.nodeX = -1200
         midi.nodeY = 0
-        # 'active' is a documented MIDI In CHOP parameter.
+        # Per MIDI_In_CHOP docs the documented parameter names are:
+        #   par.source ('device' | 'file'), par.file, par.active, par.entire,
+        #   par.start, par.end. There is no separate 'play' button on this
+        #   CHOP - playback advances with the global timeline.
+        setpar(midi, 'source', 'file')
+        setpar(midi, 'file', MIDI_FILE_PATH)
+        setpar(midi, 'entire', True)
         setpar(midi, 'active', True)
-        ok('2. midi_in ready',
-           'set midi_in.par.device on the MIDI Devices Mapper dialog')
+        ok('2. midi_in ready (file mode)', MIDI_FILE_PATH)
 
 
 # Drums activity chain + drums sphere = the minimum visual signal path.
@@ -402,8 +419,24 @@ if base is not None and out is not None:
         ok('11. window_out fullscreen output ready')
 
 
+play_started = False
 if base is not None:
-    with step('12. add fill + rim lights'):
+    with step('12. start timeline playback (drives MIDI File CHOP)'):
+        # The MIDI In CHOP in 'file' mode advances with the project timeline,
+        # so to actually hear/see anything we have to make sure the timeline
+        # is rewound and playing. `op('/').time` is the global Time COMP.
+        t = op('/').time
+        try:
+            t.frame = 1
+        except Exception:
+            pass
+        t.play = True
+        play_started = True
+        ok('12. timeline playing from frame 1')
+
+
+if base is not None:
+    with step('13. add fill + rim lights'):
         fill_l = replace(base, lightCOMP, 'light_fill')
         fill_l.nodeX = 200
         fill_l.nodeY = -800
@@ -417,7 +450,7 @@ if base is not None:
         setpar(rim_l, 'tx', 0); setpar(rim_l, 'ty', -1); setpar(rim_l, 'tz', -5)
         setpar(rim_l, 'dimmer', 0.8)
         setpar(rim_l, 'cr', 0.85); setpar(rim_l, 'cg', 0.85); setpar(rim_l, 'cb', 1.0)
-        ok('12. light_fill + light_rim ready')
+        ok('13. light_fill + light_rim ready')
 
 
 # ============================================================================
@@ -441,11 +474,11 @@ print('=' * 64)
 if fails == 0:
     print(' All steps succeeded.')
     print('')
-    print(' Next:')
-    print('   1. Set midi_in.par.device on the MIDI Devices Mapper dialog,')
-    print('      OR replace midi_in with a midifileinCHOP for .mid playback.')
-    print('   2. Middle-click OUT inside %s to preview.' % BASE_PATH)
-    print("   3. op('%s/window_out').par.winopen.pulse() for fullscreen." % BASE_PATH)
+    print(' MIDI file: %s' % MIDI_FILE_PATH)
+    print(' Timeline: %s' % ('PLAYING' if play_started else 'NOT STARTED'))
+    print('')
+    print(' Middle-click %s/OUT to preview, or:' % BASE_PATH)
+    print("   op('%s/window_out').par.winopen.pulse()  # fullscreen" % BASE_PATH)
 else:
     print(' Some steps failed; see [FAIL] lines above for the exact error')
     print(' and the traceback printed immediately after each failure.')
