@@ -1,43 +1,59 @@
 # Synesthesia Visualizer for TouchDesigner
 
 A minimal MIDI-reactive visualizer. Five simple shapes — one per instrument
-— pulse and glow in time with a MIDI file.
+— pulse and glow in time with MIDI input.
 
-This is the **simplified rebuild**: no GLSL, no instancing, no custom
-shaders. Just basic SOPs driven by Phong materials, with scale and emission
-bound to per-channel activity CHOPs via parameter expressions. The goal is
-something that *works* end-to-end before adding visual complexity.
+No GLSL. No instancing. No DAT scripts. Just SOPs driven by Phong materials,
+with scale and emission bound to per-channel activity CHOPs via parameter
+expressions.
 
 ## Requirements
 
 - TouchDesigner 2025.32460 or later
-- A `.mid` file
+- A MIDI device, OR a `.mid` file (see *Using a MIDI file* below)
 
-## Setup (3 steps)
+## Setup
 
-Each script is self-contained and idempotent — re-running rebuilds nodes
-without leaving duplicates behind.
+The whole project is built by a single script with try/except around every
+node creation. A failure in any one step does not stop the rest of the build,
+and the script prints a summary report at the end.
 
-1. Open TouchDesigner. Open the Textport with **Alt + P**.
-2. Paste the entire contents of `synesthesia_part1_setup.py`, press Enter,
-   wait for `PART 1 COMPLETE`.
-3. Click `/project1/synesthesia/midi_file_in` and set its **File** parameter
-   to your `.mid`.
-4. Paste `synesthesia_part2_visuals.py`, press Enter.
-5. Paste `synesthesia_part3_scene.py`, press Enter.
+1. Open TouchDesigner.
+2. Open the Textport with **Alt + P**.
+3. Paste the entire contents of [`synesthesia_build.py`](synesthesia_build.py)
+   and press Enter.
+4. Read the **BUILD REPORT** at the bottom of the Textport output. Every
+   step prints `[OK]` or `[FAIL]`. Failures include the exception type,
+   message, and full traceback.
+5. Set `/project1/synesthesia/midi_in`'s **device** parameter on the
+   MIDI Devices Mapper dialog.
 
 Middle-click the `OUT` Null TOP inside `/project1/synesthesia` to preview.
+
+Re-running the script is safe; it destroys `/project1/synesthesia` and
+rebuilds it from a clean slate.
+
+## Using a MIDI file instead of a live device
+
+Replace the `midi_in` CHOP with a MIDI File In CHOP after the script
+finishes:
+
+```python
+b = op('/project1/synesthesia')
+b.op('midi_in').destroy()
+mf = b.create(midifileinCHOP, 'midi_in')
+mf.par.file = 'C:/path/to/song.mid'
+```
+
+The downstream `select_*` chains read channel-name globs, so swapping the
+source CHOP is enough; nothing else needs to change.
 
 ## Transport
 
 | Action | Textport command |
 |---|---|
-| Play | `op('/project1/synesthesia/transport_timer').par.play = True` |
-| Pause | `op('/project1/synesthesia/transport_timer').par.play = False` |
-| Restart | `op('/project1/synesthesia/transport_timer').par.cue.pulse()` |
 | Fullscreen | `op('/project1/synesthesia/window_out').par.winopen.pulse()` |
 | Close window | `op('/project1/synesthesia/window_out').par.winclose.pulse()` |
-| Change file | `op('/project1/synesthesia/midi_file_in').par.file = 'C:/path/to/song.mid'` |
 
 ## Visuals
 
@@ -53,29 +69,44 @@ Each shape's scale and emission glow are driven by `activity_<name>`, a
 single-channel CHOP (0..1) produced by:
 
 ```
-midi_file_in -> select(ch{N}n* ch{N}c*) -> math(max) -> math(/127) -> lag -> rename
+midi_in -> select(ch{N}n* ch{N}c*) -> math(max) -> math(/127) -> lag -> rename
 ```
 
 The `select` pattern matches both note (`n`) and CC (`c`) channels for a
 given MIDI channel, so the visualizer responds to either.
 
+## Build phases
+
+The single script is structured in three phases:
+
+1. **Phase 1 — minimum**: container, MIDI input, drums activity chain,
+   drums sphere, camera target, orbit camera, key light, render TOP. This
+   is the smallest end-to-end pipeline that proves the chain works.
+2. **Phase 2 — extra instruments**: bass, melody, pads, lead. Each is
+   added in its own protected block.
+3. **Phase 3 — extras**: OUT null TOP, window COMP, fill + rim lights.
+
+If Phase 1 fails for any reason, Phases 2 and 3 still attempt to run, and
+the **BUILD REPORT** at the end shows exactly which steps succeeded.
+
 ## Tweaking
 
-- **Pulse intensity**: edit the `pulse` value in the `VISUALS` table at the
-  top of `synesthesia_part2_visuals.py`.
-- **Smoothing**: adjust `LAG_RISE` and `LAG_FALL` at the top of
-  `synesthesia_part1_setup.py`.
+- **Pulse intensity**: edit the per-instrument tuple in `MINIMUM` /
+  `EXTRA_INSTRUMENTS` at the top of `synesthesia_build.py` (last value).
+- **Smoothing**: adjust `LAG_RISE` and `LAG_FALL` at the top of the script.
 - **Camera speed**: change the `0.18` factor in the `cam_main` orbit
-  expressions in `synesthesia_part3_scene.py`.
-- **Bloom**: tweak `bloom_threshold.par.blacklevel` and
-  `bloom_blur.par.size`.
+  expressions.
 
-## Troubleshooting
+## Verified API references
 
-- **Nothing pulses** — confirm the `.mid` is loaded and the `transport_timer`
-  is playing. Watch `activity_drums` etc. in their CHOP viewers; they should
-  show non-zero values during playback.
-- **Black render** — make sure the `cam_main` look-at points at `cam_target`,
-  and that `render_main.par.geometry` resolves to your `*_geo` nodes.
-- **Re-run a script** — safe; each script destroys what it owns before
-  recreating.
+Every parameter name and method used by the script is taken from the
+official TouchDesigner documentation:
+
+- [CHOP_Class](https://docs.derivative.ca/CHOP_Class)
+- [OP_Class](https://docs.derivative.ca/OP_Class)
+- [MidiinCHOP_Class](https://docs.derivative.ca/MidiinCHOP_Class)
+- [Geometry_COMP](https://docs.derivative.ca/Geometry_COMP)
+- [Camera_COMP](https://docs.derivative.ca/Camera_COMP)
+- [Light_COMP](https://docs.derivative.ca/Light_COMP)
+- [Render_TOP](https://docs.derivative.ca/Render_TOP)
+- [Phong_MAT](https://docs.derivative.ca/Phong_MAT)
