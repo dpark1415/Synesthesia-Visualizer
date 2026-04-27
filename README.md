@@ -1,52 +1,59 @@
 # Synesthesia Visualizer for TouchDesigner
 
 A minimal MIDI-reactive visualizer. Five simple shapes — one per instrument
-— pulse and glow in time with MIDI input.
+— pulse, sway, and glow in time with a MIDI file.
 
 No GLSL. No instancing. No DAT scripts. Just SOPs driven by Phong materials,
-with scale and emission bound to per-channel activity CHOPs via parameter
-expressions.
+with position, scale, and emission bound to per-channel activity CHOPs via
+parameter expressions.
 
 ## Requirements
 
 - TouchDesigner 2025.32460 or later
-- A MIDI device, OR a `.mid` file (see *Using a MIDI file* below)
+- A `.mid` file at `MIDI_FILE_PATH` (set near the top of
+  [`synesthesia_build.py`](synesthesia_build.py))
 
 ## Setup
 
-The whole project is built by a single script with try/except around every
-node creation. A failure in any one step does not stop the rest of the build,
-and the script prints a summary report at the end.
+One file, one paste, no manual steps after.
 
 1. Open TouchDesigner.
 2. Open the Textport with **Alt + P**.
-3. Paste the entire contents of [`synesthesia_build.py`](synesthesia_build.py)
-   and press Enter.
-4. Read the **BUILD REPORT** at the bottom of the Textport output. Every
-   step prints `[OK]` or `[FAIL]`. Failures include the exception type,
-   message, and full traceback.
-5. Set `/project1/synesthesia/midi_in`'s **device** parameter on the
-   MIDI Devices Mapper dialog.
+3. Run the builder:
 
+   ```python
+   exec(open(r'C:\path\to\synesthesia_build.py').read())
+   ```
+
+   (Pasting the whole script directly into the Textport works too, but the
+   Textport occasionally mis-handles multi-line paste, so `exec(open(...))`
+   is the recommended way.)
+4. Read the **BUILD REPORT** in the Textport. Every step prints `[OK]` or
+   `[FAIL]` with full tracebacks on failure.
+
+The script configures `midi_in` for **file mode** with `MIDI_FILE_PATH`,
+starts the timeline, and you should see the geometry pulsing within seconds.
 Middle-click the `OUT` Null TOP inside `/project1/synesthesia` to preview.
 
 Re-running the script is safe; it destroys `/project1/synesthesia` and
 rebuilds it from a clean slate.
 
-## Using a MIDI file instead of a live device
+## Switching MIDI file
 
-Replace the `midi_in` CHOP with a MIDI File In CHOP after the script
-finishes:
+Edit `MIDI_FILE_PATH` near the top of `synesthesia_build.py` and re-run.
+
+## Using a live MIDI device instead of a file
+
+After the script finishes:
 
 ```python
-b = op('/project1/synesthesia')
-b.op('midi_in').destroy()
-mf = b.create(midifileinCHOP, 'midi_in')
-mf.par.file = 'C:/path/to/song.mid'
+m = op('/project1/synesthesia/midi_in')
+m.par.source = 'device'
+# then set m.par.device on the MIDI Devices Mapper dialog
 ```
 
-The downstream `select_*` chains read channel-name globs, so swapping the
-source CHOP is enough; nothing else needs to change.
+The downstream `select_*` chains read channel-name globs, so flipping
+`source` is enough; nothing else needs to change.
 
 ## Transport
 
