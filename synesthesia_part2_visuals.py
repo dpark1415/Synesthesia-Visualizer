@@ -14,21 +14,32 @@ if not base:
 # HELPER: quick inline GLSL material
 # ---------------------------------------------------------------------------
 def make_glsl_mat(parent, name, vert, frag, x=0, y=0):
-    """Create a GLSL MAT with inline vertex + fragment shaders."""
+    """Create a GLSL MAT with inline vertex + fragment shaders.
+
+    The DATs are named <name>_vertex and <name>_pixel to match
+    TouchDesigner's GLSL MAT parameter convention.
+    """
     g = parent.create(glslMAT, name)
     g.nodeX = x
     g.nodeY = y
     # Write shader code into DATs
-    v_dat = parent.create(textDAT, name + '_vert')
+    v_dat = parent.create(textDAT, name + '_vertex')
     v_dat.text = vert
     v_dat.nodeX = x - 150
     v_dat.nodeY = y
-    f_dat = parent.create(textDAT, name + '_frag')
+    f_dat = parent.create(textDAT, name + '_pixel')
     f_dat.text = frag
     f_dat.nodeX = x - 150
     f_dat.nodeY = y - 80
-    g.par.glslvertex = v_dat.path
-    g.par.glslpixel = f_dat.path
+    # GLSL MAT parameter names (try modern + legacy)
+    for vp in ('vertexshader', 'glslvertex'):
+        if hasattr(g.par, vp):
+            setattr(g.par, vp, v_dat.path)
+            break
+    for fp in ('pixelshader', 'glslpixel'):
+        if hasattr(g.par, fp):
+            setattr(g.par, fp, f_dat.path)
+            break
     return g
 
 # ==============================  KICK DRUM  ================================
@@ -53,12 +64,11 @@ void main(){
     vec3 col = mix(vec3(0.3,0.02,0.02), vec3(1.0,0.15,0.05),
                    uActivity * 0.8 + rim * 0.5);
     col += vec3(1.0,0.3,0.1) * uActivity * rim * 2.0;
-    fragColor = vec4(col, 1.0);
+    fragColor = TDOutputSwizzle(vec4(col, 1.0));
 }
 '''
 kick_vert = '''
 uniform float uActivity;
-in vec3 P; in vec3 N;
 out Vert { vec3 worldNorm; vec3 worldPos; } oVert;
 void main(){
     vec3 pos = P * (1.0 + uActivity * 0.35);
@@ -87,23 +97,23 @@ snare_torus.par.radius2 = 0.04
 snare_frag = '''
 uniform float uActivity;
 out vec4 fragColor;
-in Vert { vec3 wN; vec3 wP; } i;
+in Vert { vec3 wN; vec3 wP; } iVert;
 void main(){
-    float rim = pow(1.0-abs(dot(normalize(i.wN),normalize(-i.wP))),3.0);
+    float rim = pow(1.0-abs(dot(normalize(iVert.wN),normalize(-iVert.wP))),3.0);
     float pulse = uActivity;
     vec3 col = mix(vec3(0.0,0.15,0.2), vec3(0.0,0.9,1.0), pulse);
     col += vec3(0.3,1.0,1.0) * rim * pulse * 3.0;
     float alpha = mix(0.1, 0.95, pulse) + rim * 0.5;
-    fragColor = vec4(col, clamp(alpha,0.0,1.0));
+    fragColor = TDOutputSwizzle(vec4(col, clamp(alpha,0.0,1.0)));
 }
 '''
 snare_vert = '''
 uniform float uActivity;
-in vec3 P; in vec3 N;
-out Vert { vec3 wN; vec3 wP; } o;
+out Vert { vec3 wN; vec3 wP; } oVert;
 void main(){
     vec3 pos = P * (1.0 + uActivity * 0.6);
-    o.wN = N; o.wP = pos;
+    oVert.wN = N;
+    oVert.wP = pos;
     gl_Position = TDWorldToProj(TDDeform(pos));
 }
 '''
@@ -123,27 +133,69 @@ hh_sphere.par.radius = 0.02
 hh_sphere.par.rows = 8
 hh_sphere.par.cols = 8
 
-# Instance positions via noise DAT
+# Instance positions via tab-separated DAT (table format: header + rows)
 hh_script = base.create(scriptCHOP, 'hihat_instances')
 hh_script.nodeX = 600
 hh_script.nodeY = 150
-hh_dat = base.create(textDAT, 'hihat_instance_dat')
+hh_dat = base.create(tableDAT, 'hihat_instance_dat')
 hh_dat.nodeX = 600
 hh_dat.nodeY = 250
-lines = ['tx\tty\ttz']
 import math
+hh_dat.clear()
+hh_dat.appendRow(['tx', 'ty', 'tz'])
 for i in range(30):
     a = i * 2.399  # golden angle
     r = 0.3 + (i / 30.0) * 1.2
     x = math.cos(a) * r
     y = math.sin(a * 0.7) * 0.5
     z = math.sin(a) * r
-    lines.append(f'{x:.3f}\t{y:.3f}\t{z:.3f}')
-hh_dat.text = '\n'.join(lines)
+    hh_dat.appendRow([f'{x:.3f}', f'{y:.3f}', f'{z:.3f}'])
 
+# Wire instancing: read positions from the table DAT
 hh_geo.par.instancing = True
-hh_geo.par.instancechop = ''  # will read from DAT via CHOP
-print('[Part 2] Hi-hat — 30 spark particles')
+if hasattr(hh_geo.par, 'instanceop'):
+    hh_geo.par.instanceop = hh_dat.path
+if hasattr(hh_geo.par, 'instancetx'):
+    hh_geo.par.instancetx = 'tx'
+    hh_geo.par.instancety = 'ty'
+    hh_geo.par.instancetz = 'tz'
+
+# Script CHOP callbacks DAT — drives per-spark velocity reactivity
+hh_script_cb = base.create(textDAT, 'hihat_instances_callbacks')
+hh_script_cb.nodeX = 800
+hh_script_cb.nodeY = 150
+hh_script_cb.text = '''# Script CHOP callbacks for hihat_instances
+# Generates 30 channels of per-spark "twinkle" amplitude.
+
+import math
+
+def onSetupParameters(scriptOp):
+    return
+
+def onPulse(par):
+    return
+
+def onCook(scriptOp):
+    scriptOp.clear()
+    n = 30
+    t = absTime.seconds
+    activity = 0.0
+    activity_chop = op('activity_drums')
+    if activity_chop is not None and activity_chop.numChans > 0:
+        activity = float(activity_chop[0])
+    for i in range(n):
+        chan = scriptOp.appendChan(f'spark{i}')
+        phase = i * 2.399 + t * 4.0
+        chan[0] = (0.5 + 0.5 * math.sin(phase)) * (0.2 + activity)
+    scriptOp.numSamples = 1
+    scriptOp.rate = me.time.rate
+    return
+'''
+if hasattr(hh_script.par, 'callbacks'):
+    hh_script.par.callbacks = hh_script_cb.path
+elif hasattr(hh_script.par, 'dat'):
+    hh_script.par.dat = hh_script_cb.path
+print('[Part 2] Hi-hat — 30 spark particles + callback DAT')
 
 # ==============================  BASS  =====================================
 # Noise-displaced sphere, deep blue/purple, bioluminescent glow
@@ -161,36 +213,37 @@ bass_frag = '''
 uniform float uActivity;
 uniform float uTime;
 out vec4 fragColor;
-in Vert { vec3 wN; vec3 wP; float disp; } i;
+in Vert { vec3 wN; vec3 wP; float disp; } iVert;
 void main(){
-    float rim = pow(1.0-abs(dot(normalize(i.wN),normalize(-i.wP))),2.5);
+    float rim = pow(1.0-abs(dot(normalize(iVert.wN),normalize(-iVert.wP))),2.5);
     vec3 deep = vec3(0.02, 0.01, 0.12);
     vec3 glow = vec3(0.1, 0.2, 0.9);
     vec3 bio  = vec3(0.0, 0.6, 0.8);
     vec3 col = mix(deep, glow, uActivity * 0.7);
     col += bio * rim * (0.5 + uActivity * 1.5);
-    col += vec3(0.3, 0.1, 0.8) * i.disp * uActivity;
-    fragColor = vec4(col, 1.0);
+    col += vec3(0.3, 0.1, 0.8) * iVert.disp * uActivity;
+    fragColor = TDOutputSwizzle(vec4(col, 1.0));
 }
 '''
 bass_vert = '''
 uniform float uActivity;
 uniform float uTime;
-in vec3 P; in vec3 N;
-out Vert { vec3 wN; vec3 wP; float disp; } o;
+out Vert { vec3 wN; vec3 wP; float disp; } oVert;
 // Simple 3D noise
-float hash(vec3 p){ return fract(sin(dot(p,vec3(127.1,311.7,74.7)))*43758.5); }
-float noise3(vec3 p){
-    vec3 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
-    return mix(mix(mix(hash(i),hash(i+vec3(1,0,0)),f.x),
-               mix(hash(i+vec3(0,1,0)),hash(i+vec3(1,1,0)),f.x),f.y),
-           mix(mix(hash(i+vec3(0,0,1)),hash(i+vec3(1,0,1)),f.x),
-               mix(hash(i+vec3(0,1,1)),hash(i+vec3(1,1,1)),f.x),f.y),f.z);
+float bassHash(vec3 p){ return fract(sin(dot(p,vec3(127.1,311.7,74.7)))*43758.5); }
+float bassNoise(vec3 p){
+    vec3 ip=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+    return mix(mix(mix(bassHash(ip),bassHash(ip+vec3(1,0,0)),f.x),
+               mix(bassHash(ip+vec3(0,1,0)),bassHash(ip+vec3(1,1,0)),f.x),f.y),
+           mix(mix(bassHash(ip+vec3(0,0,1)),bassHash(ip+vec3(1,0,1)),f.x),
+               mix(bassHash(ip+vec3(0,1,1)),bassHash(ip+vec3(1,1,1)),f.x),f.y),f.z);
 }
 void main(){
-    float n = noise3(P * 3.0 + uTime * 0.3) * 0.3 * (0.3 + uActivity);
+    float n = bassNoise(P * 3.0 + uTime * 0.3) * 0.3 * (0.3 + uActivity);
     vec3 pos = P + N * n;
-    o.wN = N; o.wP = pos; o.disp = n;
+    oVert.wN = N;
+    oVert.wP = pos;
+    oVert.disp = n;
     gl_Position = TDWorldToProj(TDDeform(pos));
 }
 '''
@@ -210,40 +263,50 @@ mel_sph.par.radius = 0.025
 mel_sph.par.rows = 8
 mel_sph.par.cols = 8
 
-mel_dat = base.create(textDAT, 'melody_instance_dat')
+mel_dat = base.create(tableDAT, 'melody_instance_dat')
 mel_dat.nodeX = 300
 mel_dat.nodeY = -150
-mlines = ['tx\tty\ttz']
+mel_dat.clear()
+mel_dat.appendRow(['tx', 'ty', 'tz'])
 for i in range(50):
     t = i / 50.0 * math.pi * 4
     r = 0.5 + i / 50.0 * 2.0
     x = math.cos(t) * r
     y = math.sin(t * 1.3) * 0.8 + math.cos(i * 0.5) * 0.3
     z = math.sin(t) * r
-    mlines.append(f'{x:.3f}\t{y:.3f}\t{z:.3f}')
-mel_dat.text = '\n'.join(mlines)
+    mel_dat.appendRow([f'{x:.3f}', f'{y:.3f}', f'{z:.3f}'])
 
 mel_geo.par.instancing = True
+if hasattr(mel_geo.par, 'instanceop'):
+    mel_geo.par.instanceop = mel_dat.path
+if hasattr(mel_geo.par, 'instancetx'):
+    mel_geo.par.instancetx = 'tx'
+    mel_geo.par.instancety = 'ty'
+    mel_geo.par.instancetz = 'tz'
 
 mel_frag_code = '''
 uniform float uActivity;
 out vec4 fragColor;
-in Vert { vec3 wN; vec3 wP; } i;
+in Vert { vec3 wN; vec3 wP; } iVert;
 void main(){
-    float rim = pow(1.0-abs(dot(normalize(i.wN),normalize(-i.wP))),2.0);
+    float rim = pow(1.0-abs(dot(normalize(iVert.wN),normalize(-iVert.wP))),2.0);
     vec3 gold = vec3(1.0, 0.85, 0.3);
     vec3 white = vec3(1.0, 0.95, 0.8);
     vec3 col = mix(gold * 0.3, white, uActivity * 0.6 + rim * 0.8);
     col += gold * rim * uActivity * 2.0;
-    fragColor = vec4(col, 0.6 + uActivity * 0.4);
+    fragColor = TDOutputSwizzle(vec4(col, 0.6 + uActivity * 0.4));
 }
 '''
-mel_mat = make_glsl_mat(base, 'melody_mat',
-    'in vec3 P; in vec3 N;\n'
-    'out Vert { vec3 wN; vec3 wP; } o;\n'
-    'void main(){ o.wN=N; o.wP=P;\n'
-    '  gl_Position=TDWorldToProj(TDDeform(P)); }',
-    mel_frag_code, 300, -400)
+mel_vert_code = '''
+out Vert { vec3 wN; vec3 wP; } oVert;
+void main(){
+    oVert.wN = N;
+    oVert.wP = P;
+    gl_Position = TDWorldToProj(TDDeform(P));
+}
+'''
+mel_mat = make_glsl_mat(base, 'melody_mat', mel_vert_code, mel_frag_code,
+                        300, -400)
 mel_geo.par.material = mel_mat.path
 print('[Part 2] Melody — 50 gold arc particles')
 
@@ -255,31 +318,40 @@ uniform float uActivity;
 uniform float uTime;
 uniform float uLayer;
 out vec4 fragColor;
-in Vert { vec2 uv; } i;
-float hash2(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5); }
-float noise2(vec2 p){
-    vec2 i2=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
-    return mix(mix(hash2(i2),hash2(i2+vec2(1,0)),f.x),
-               mix(hash2(i2+vec2(0,1)),hash2(i2+vec2(1,1)),f.x),f.y);
+in Vert { vec2 uv; } iVert;
+float padHash(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5); }
+float padNoise(vec2 p){
+    vec2 ip=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+    return mix(mix(padHash(ip),padHash(ip+vec2(1,0)),f.x),
+               mix(padHash(ip+vec2(0,1)),padHash(ip+vec2(1,1)),f.x),f.y);
 }
-float fbm(vec2 p){ float v=0.0,a=0.5;
-    for(int i=0;i<5;i++){ v+=a*noise2(p); p*=2.01; a*=0.5; } return v; }
+float fbm(vec2 p){
+    float v = 0.0;
+    float a = 0.5;
+    for(int k=0; k<5; k++){
+        v += a * padNoise(p);
+        p *= 2.01;
+        a *= 0.5;
+    }
+    return v;
+}
 void main(){
-    vec2 uv = i.uv * 3.0 + uLayer * 1.5;
+    vec2 uv = iVert.uv * 3.0 + uLayer * 1.5;
     float n = fbm(uv + uTime * 0.08 + uLayer);
     vec3 teal = vec3(0.0, 0.5, 0.5);
     vec3 violet = vec3(0.4, 0.1, 0.6);
     vec3 col = mix(teal, violet, n + uLayer * 0.2);
     col *= 0.4 + uActivity * 0.8;
     float alpha = n * (0.15 + uActivity * 0.25);
-    fragColor = vec4(col, alpha);
+    fragColor = TDOutputSwizzle(vec4(col, alpha));
 }
 '''
 pad_vert = '''
-in vec3 P; in vec2 uv0;
-out Vert { vec2 uv; } o;
-void main(){ o.uv = uv0;
-  gl_Position = TDWorldToProj(TDDeform(P)); }
+out Vert { vec2 uv; } oVert;
+void main(){
+    oVert.uv = uv[0].st;
+    gl_Position = TDWorldToProj(TDDeform(P));
+}
 '''
 for layer in range(3):
     pname = f'pad_geo_{layer}'
@@ -313,33 +385,33 @@ lead_frag = '''
 uniform float uActivity;
 uniform float uTime;
 out vec4 fragColor;
-in Vert { vec3 wN; vec3 wP; } i;
+in Vert { vec3 wN; vec3 wP; } iVert;
 void main(){
-    float rim = pow(1.0-abs(dot(normalize(i.wN),normalize(-i.wP))),2.0);
+    float rim = pow(1.0-abs(dot(normalize(iVert.wN),normalize(-iVert.wP))),2.0);
     vec3 white = vec3(0.95, 0.93, 0.88);
     vec3 gold = vec3(1.0, 0.85, 0.4);
     vec3 col = mix(white, gold, rim * 0.6 + uActivity * 0.3);
     col += vec3(1.0,0.9,0.7) * rim * uActivity * 2.5;
-    fragColor = vec4(col, 0.7 + uActivity * 0.3);
+    fragColor = TDOutputSwizzle(vec4(col, 0.7 + uActivity * 0.3));
 }
 '''
 lead_vert = '''
 uniform float uActivity;
 uniform float uTime;
-in vec3 P; in vec3 N;
-out Vert { vec3 wN; vec3 wP; } o;
-float hash(vec3 p){ return fract(sin(dot(p,vec3(127.1,311.7,74.7)))*43758.5); }
-float noise3(vec3 p){
-    vec3 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
-    return mix(mix(mix(hash(i),hash(i+vec3(1,0,0)),f.x),
-               mix(hash(i+vec3(0,1,0)),hash(i+vec3(1,1,0)),f.x),f.y),
-           mix(mix(hash(i+vec3(0,0,1)),hash(i+vec3(1,0,1)),f.x),
-               mix(hash(i+vec3(0,1,1)),hash(i+vec3(1,1,1)),f.x),f.y),f.z);
+out Vert { vec3 wN; vec3 wP; } oVert;
+float leadHash(vec3 p){ return fract(sin(dot(p,vec3(127.1,311.7,74.7)))*43758.5); }
+float leadNoise(vec3 p){
+    vec3 ip=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+    return mix(mix(mix(leadHash(ip),leadHash(ip+vec3(1,0,0)),f.x),
+               mix(leadHash(ip+vec3(0,1,0)),leadHash(ip+vec3(1,1,0)),f.x),f.y),
+           mix(mix(leadHash(ip+vec3(0,0,1)),leadHash(ip+vec3(1,0,1)),f.x),
+               mix(leadHash(ip+vec3(0,1,1)),leadHash(ip+vec3(1,1,1)),f.x),f.y),f.z);
 }
 void main(){
-    float sway = noise3(P * 2.0 + uTime * 0.5) * 0.3 * (0.4 + uActivity);
+    float sway = leadNoise(P * 2.0 + uTime * 0.5) * 0.3 * (0.4 + uActivity);
     vec3 pos = P + N * sway;
-    o.wN = N; o.wP = pos;
+    oVert.wN = N;
+    oVert.wP = pos;
     gl_Position = TDWorldToProj(TDDeform(pos));
 }
 '''
@@ -359,20 +431,26 @@ star_sph.par.radius = 0.012
 star_sph.par.rows = 6
 star_sph.par.cols = 6
 
-star_dat = base.create(textDAT, 'stars_instance_dat')
+star_dat = base.create(tableDAT, 'stars_instance_dat')
 star_dat.nodeX = 900
 star_dat.nodeY = -200
-slines = ['tx\tty\ttz']
 import random
-random.seed(42)
+star_dat.clear()
+star_dat.appendRow(['tx', 'ty', 'tz'])
+rng = random.Random(42)
 for i in range(200):
-    x = (random.random() - 0.5) * 12
-    y = (random.random() - 0.5) * 8
-    z = (random.random() - 0.5) * 12
-    slines.append(f'{x:.3f}\t{y:.3f}\t{z:.3f}')
-star_dat.text = '\n'.join(slines)
+    x = (rng.random() - 0.5) * 12
+    y = (rng.random() - 0.5) * 8
+    z = (rng.random() - 0.5) * 12
+    star_dat.appendRow([f'{x:.3f}', f'{y:.3f}', f'{z:.3f}'])
 
 star_geo.par.instancing = True
+if hasattr(star_geo.par, 'instanceop'):
+    star_geo.par.instanceop = star_dat.path
+if hasattr(star_geo.par, 'instancetx'):
+    star_geo.par.instancetx = 'tx'
+    star_geo.par.instancety = 'ty'
+    star_geo.par.instancetz = 'tz'
 
 star_mat = base.create(constantMAT, 'star_mat')
 star_mat.nodeX = 900

@@ -158,6 +158,45 @@ timer.par.length = 300       # 5 minutes max
 timer.par.play = False       # start paused
 print('[Part 1] Created transport timer')
 
+# Timer CHOP callback DAT — fires on start / done / cycle
+timer_cb = base.create(textDAT, 'transport_timer_callbacks')
+timer_cb.nodeX = -400
+timer_cb.nodeY = -600
+timer_cb.text = '''# Timer CHOP callbacks
+# Attach this DAT to transport_timer's "Callbacks DAT" parameter.
+
+def onInitialize(timerOp):
+    return
+
+def onStart(timerOp):
+    print('[transport] start')
+    return
+
+def onCycle(timerOp):
+    return
+
+def onDone(timerOp):
+    print('[transport] done — looping')
+    timerOp.par.cue.pulse()
+    timerOp.par.play = True
+    return
+
+def onSegmentEnter(timerOp, segment):
+    return
+
+def onSegmentExit(timerOp, segment):
+    return
+
+def onTimerPulse(timerOp):
+    return
+'''
+# Wire callbacks DAT to timer CHOP
+try:
+    timer.par.callbacks = timer_cb.path
+except Exception:
+    pass
+print('[Part 1] Created transport timer callbacks DAT')
+
 # ---------------------------------------------------------------------------
 # DONE — Part 1 complete
 # ---------------------------------------------------------------------------

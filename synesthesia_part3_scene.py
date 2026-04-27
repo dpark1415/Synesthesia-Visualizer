@@ -163,21 +163,21 @@ print('[Part 3] Colour grading')
 # ---------------------------------------------------------------------------
 # 7. VIGNETTE — GLSL post-process
 # ---------------------------------------------------------------------------
-vig_dat = base.create(textDAT, 'vignette_shader')
+vig_dat = base.create(textDAT, 'vignette_compute')
 vig_dat.nodeX = 1000
 vig_dat.nodeY = -1100
-vig_dat.text = '''
-// Vignette GLSL shader — darkens edges for cinematic focus
-uniform float uStrength;  // 0.0 = off, 1.0 = heavy
+vig_dat.text = '''// Vignette GLSL shader -- darkens edges for cinematic focus
+uniform float uStrength;
 out vec4 fragColor;
 void main(){
     vec2 uv = vUV.st;
     vec2 center = uv - 0.5;
     float dist = length(center);
+    float strength = (uStrength > 0.0) ? uStrength : 0.55;
     float vig = smoothstep(0.45, 0.75, dist);
     vec4 col = texture(sTD2DInputs[0], uv);
-    col.rgb *= 1.0 - vig * 0.55;
-    fragColor = col;
+    col.rgb *= 1.0 - vig * strength;
+    fragColor = TDOutputSwizzle(col);
 }
 '''
 
@@ -185,10 +185,13 @@ vig_top = base.create(glslTOP, 'vignette')
 vig_top.nodeX = 1200
 vig_top.nodeY = -900
 vig_top.inputConnectors[0].connect(grade)
-vig_top.par.pixeldat = vig_dat.path
+if hasattr(vig_top.par, 'pixeldat'):
+    vig_top.par.pixeldat = vig_dat.path
+elif hasattr(vig_top.par, 'glslpixel'):
+    vig_top.par.glslpixel = vig_dat.path
 vig_top.par.resolutionw = 1920
 vig_top.par.resolutionh = 1080
-print('[Part 3] Vignette shader')
+print('[Part 3] Vignette shader (vignette_compute)')
 
 # ---------------------------------------------------------------------------
 # 8. NULL TOP — final output reference
@@ -220,30 +223,49 @@ transport_dat.nodeY = -900
 transport_dat.text = '''# =====================================================
 # TRANSPORT CONTROLS
 # =====================================================
-# Paste any of these one-liners into the Textport to
-# control playback. You can also bind them to keyboard.
-#
-# PLAY:
-#   op('/project1/synesthesia/transport_timer').par.play = True
-#
-# PAUSE:
-#   op('/project1/synesthesia/transport_timer').par.play = False
-#
-# RESTART (rewind to start):
-#   op('/project1/synesthesia/transport_timer').par.cue = True; \\
-#   op('/project1/synesthesia/transport_timer').par.cuepulse.pulse()
-#
-# LOAD A DIFFERENT MIDI FILE:
-#   op('/project1/synesthesia/midi_file_in').par.file = 'C:/path/to/song.mid'
-#
-# TOGGLE FULLSCREEN:
-#   op('/project1/synesthesia/window_out').par.winopen = True
-#
-# CLOSE FULLSCREEN:
-#   op('/project1/synesthesia/window_out').par.winclose = True
-# =====================================================
+# Importable helpers. Call from Textport, keyboard
+# callback, or any DAT:
+#   import transport_controls as tc
+#   tc.play()
+
+TIMER_PATH = '/project1/synesthesia/transport_timer'
+MIDI_PATH  = '/project1/synesthesia/midi_file_in'
+WIN_PATH   = '/project1/synesthesia/window_out'
+
+def _timer():
+    return op(TIMER_PATH)
+
+def play():
+    t = _timer()
+    if t is not None:
+        t.par.play = True
+
+def pause():
+    t = _timer()
+    if t is not None:
+        t.par.play = False
+
+def restart():
+    t = _timer()
+    if t is not None:
+        t.par.cue.pulse()
+
+def load_midi(path):
+    m = op(MIDI_PATH)
+    if m is not None:
+        m.par.file = path
+
+def fullscreen():
+    w = op(WIN_PATH)
+    if w is not None:
+        w.par.winopen.pulse()
+
+def windowed():
+    w = op(WIN_PATH)
+    if w is not None:
+        w.par.winclose.pulse()
 '''
-print('[Part 3] Transport control reference saved')
+print('[Part 3] Transport control helpers saved')
 
 # ---------------------------------------------------------------------------
 # 11. PLAY / PAUSE KEYBOARD SCRIPT
@@ -251,21 +273,40 @@ print('[Part 3] Transport control reference saved')
 kb_dat = base.create(textDAT, 'keyboard_shortcuts')
 kb_dat.nodeX = -600
 kb_dat.nodeY = -1050
-kb_dat.text = '''# Keyboard In DAT callback template
-# To use: create a Keyboard In DAT and set its callback to this DAT.
-#
-# def onKey(dat, key, state):
-#     timer = op('/project1/synesthesia/transport_timer')
-#     if key == 'space' and state:
-#         timer.par.play = not timer.par.play
-#     if key == 'r' and state:
-#         timer.par.cue = True
-#         timer.par.cuepulse.pulse()
-#     if key == 'f' and state:
-#         win = op('/project1/synesthesia/window_out')
-#         win.par.winopen.pulse()
+kb_dat.text = '''# Keyboard In DAT callbacks
+# Wired to keyboard_in DAT (created below). Edit freely.
+
+def onKey(dat, key, state):
+    # state == True on key-down, False on key-up
+    if not state:
+        return
+    timer = op('/project1/synesthesia/transport_timer')
+    if timer is None:
+        return
+    if key == 'space':
+        timer.par.play = not bool(timer.par.play.eval())
+    elif key == 'r':
+        timer.par.cue.pulse()
+    elif key == 'f':
+        win = op('/project1/synesthesia/window_out')
+        if win is not None:
+            win.par.winopen.pulse()
+    elif key == 'esc':
+        win = op('/project1/synesthesia/window_out')
+        if win is not None:
+            win.par.winclose.pulse()
+    return
 '''
-print('[Part 3] Keyboard shortcut reference saved')
+
+# Keyboard In DAT that fires the callback
+kb_in = base.create(keyboardinDAT, 'keyboard_in')
+kb_in.nodeX = -800
+kb_in.nodeY = -1050
+if hasattr(kb_in.par, 'callbacks'):
+    kb_in.par.callbacks = kb_dat.path
+elif hasattr(kb_in.par, 'callbackdat'):
+    kb_in.par.callbackdat = kb_dat.path
+print('[Part 3] Keyboard shortcuts wired (space=play, r=restart, f=fullscreen, esc=close)')
 
 # ---------------------------------------------------------------------------
 # DONE — all three parts complete!
