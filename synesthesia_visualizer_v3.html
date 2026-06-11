@@ -1,0 +1,1604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Synesthesia Visualizer v3</title>
+<style>
+  :root{
+    --accent:#8fb7ff;
+    --panel-bg:rgba(7,11,20,.66);
+    --panel-border:rgba(150,180,255,.10);
+    --txt:#c6d4ee;
+    --txt-dim:#5f6f8f;
+    --mono:'JetBrains Mono','SF Mono',Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:100%;height:100%;overflow:hidden;background:#000}
+  body{font:13px/1.45 Inter,ui-sans-serif,system-ui,'Segoe UI',Roboto,sans-serif;color:var(--txt);
+       -webkit-font-smoothing:antialiased;user-select:none}
+  canvas{display:block}
+
+  /* ---------- drop overlay ---------- */
+  #drop-overlay{position:fixed;inset:0;z-index:40;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(ellipse at center,rgba(70,120,255,.14),rgba(0,0,10,.55));
+    backdrop-filter:blur(7px);opacity:0;pointer-events:none;transition:opacity .18s ease}
+  #drop-overlay.show{opacity:1}
+  .drop-ring{width:300px;height:300px;border:1.5px dashed rgba(150,190,255,.75);border-radius:50%;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+    box-shadow:0 0 60px rgba(110,160,255,.25),inset 0 0 60px rgba(110,160,255,.12);
+    transform:scale(.96);transition:transform .18s ease}
+  #drop-overlay.show .drop-ring{transform:scale(1)}
+  .drop-label{font-size:20px;letter-spacing:.5em;text-indent:.5em;color:#dce8ff;font-weight:600}
+  .drop-sub{font-size:11px;letter-spacing:.25em;color:var(--txt-dim)}
+
+  /* ---------- hint card ---------- */
+  #hint-card{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:30;text-align:center;
+    padding:38px 52px;border-radius:16px;background:var(--panel-bg);backdrop-filter:blur(16px);
+    border:1px solid var(--panel-border);box-shadow:0 18px 70px rgba(0,0,0,.55);
+    transition:opacity .6s ease,transform .6s ease}
+  #hint-card.gone{opacity:0;transform:translate(-50%,-54%);pointer-events:none}
+  #hint-card h1{font-size:21px;font-weight:600;letter-spacing:.42em;text-indent:.42em;color:#e8f0ff}
+  #hint-card h1 span{color:var(--accent);font-weight:300}
+  #hint-card p{margin:14px 0 20px;color:var(--txt-dim);font-size:12.5px;letter-spacing:.04em}
+  #hint-card button{cursor:pointer;padding:9px 26px;border-radius:8px;border:1px solid rgba(150,190,255,.35);
+    background:rgba(110,160,255,.12);color:#dbe7ff;font:600 12px Inter,sans-serif;letter-spacing:.14em;
+    transition:background .15s}
+  #hint-card button:hover{background:rgba(110,160,255,.25)}
+
+  /* ---------- panels ---------- */
+  .panel{position:fixed;z-index:20;width:272px;border-radius:12px;background:var(--panel-bg);
+    backdrop-filter:blur(16px);border:1px solid var(--panel-border);
+    box-shadow:0 10px 44px rgba(0,0,0,.45);overflow:hidden}
+  #track-panel{left:16px;top:16px}
+  #tune-panel{right:16px;top:16px;width:284px}
+  .panel header{display:flex;align-items:center;gap:8px;padding:10px 12px;cursor:pointer;
+    border-bottom:1px solid rgba(150,180,255,.07)}
+  .panel header .ttl{font-size:10.5px;font-weight:700;letter-spacing:.3em;color:#9fb4da}
+  .panel header .file-label{flex:1;text-align:right;font-size:10px;color:var(--txt-dim);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .panel header .fold{margin-left:auto;background:none;border:none;color:var(--txt-dim);cursor:pointer;
+    font:600 13px var(--mono);padding:0 2px}
+  .panel .body{padding:10px 12px;max-height:62vh;overflow-y:auto}
+  .panel .body.folded{display:none}
+  .panel .body::-webkit-scrollbar{width:6px}
+  .panel .body::-webkit-scrollbar-thumb{background:rgba(150,180,255,.18);border-radius:3px}
+  .empty{color:var(--txt-dim);font-size:11.5px;padding:6px 0}
+
+  /* track rows */
+  .trk{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid rgba(150,180,255,.05)}
+  .trk:last-child{border-bottom:none}
+  .trk .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .trk .meta{flex:1;min-width:0}
+  .trk .nm{font-size:11.5px;color:#d7e2f7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .trk .sub{font-size:9.5px;color:var(--txt-dim);font-family:var(--mono)}
+  .trk select{flex:none;width:84px;background:rgba(20,28,48,.9);color:var(--txt);border:1px solid rgba(150,180,255,.18);
+    border-radius:6px;font:11px Inter,sans-serif;padding:3px 4px;cursor:pointer}
+
+  /* tuning rows */
+  .row{display:flex;align-items:center;gap:8px;margin:7px 0}
+  .row label{flex:none;width:108px;font-size:10.5px;color:#9fb0cf;letter-spacing:.03em}
+  .row .val{flex:none;width:38px;text-align:right;font:10px var(--mono);color:var(--txt-dim)}
+  .row input[type=range]{flex:1;-webkit-appearance:none;height:3px;border-radius:2px;
+    background:rgba(150,180,255,.18);outline:none}
+  .row input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;border-radius:50%;
+    background:var(--accent);border:none;cursor:pointer;box-shadow:0 0 8px rgba(140,180,255,.5)}
+  .preset-row select{flex:1;background:rgba(20,28,48,.9);color:#dbe7ff;border:1px solid rgba(150,180,255,.22);
+    border-radius:7px;font:12px Inter,sans-serif;padding:6px;cursor:pointer}
+  .sect{margin:13px 0 4px;font-size:9.5px;font-weight:700;letter-spacing:.26em;color:#6d7fa3}
+
+  /* ---------- transport ---------- */
+  #transport{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:20;
+    display:flex;align-items:center;gap:12px;padding:10px 18px;border-radius:14px;
+    background:var(--panel-bg);backdrop-filter:blur(16px);border:1px solid var(--panel-border);
+    box-shadow:0 10px 44px rgba(0,0,0,.45);min-width:540px;opacity:.35;pointer-events:none;
+    transition:opacity .4s}
+  #transport.on{opacity:1;pointer-events:auto}
+  #transport button{background:none;border:none;color:#d7e2f7;cursor:pointer;font-size:15px;
+    width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;
+    transition:background .12s}
+  #transport button:hover{background:rgba(150,180,255,.12)}
+  #transport button.lit{color:var(--accent)}
+  #time-label{font:11px var(--mono);color:var(--txt-dim);white-space:nowrap;min-width:88px;text-align:center}
+  #scrub{flex:1;-webkit-appearance:none;height:4px;border-radius:2px;background:rgba(150,180,255,.18);outline:none;min-width:220px}
+  #scrub::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;
+    background:#dbe7ff;cursor:pointer;box-shadow:0 0 10px rgba(160,200,255,.6)}
+  #fps-label{font:10px var(--mono);color:var(--txt-dim);width:42px;text-align:right}
+
+  /* ---------- toast ---------- */
+  #toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%) translateY(8px);z-index:50;
+    padding:8px 18px;border-radius:9px;background:rgba(12,18,32,.92);border:1px solid var(--panel-border);
+    color:#cfe0ff;font-size:12px;opacity:0;pointer-events:none;transition:all .25s ease}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.1/examples/jsm/"
+  }
+}
+</script>
+<script src="https://cdn.jsdelivr.net/npm/tone@14.8.49/build/Tone.js"></script>
+</head>
+<body>
+
+<div id="drop-overlay"><div class="drop-ring"><div class="drop-label">DROP MIDI</div><div class="drop-sub">.mid · .midi</div></div></div>
+
+<div id="hint-card">
+  <h1>SYNESTHESIA <span>v3</span></h1>
+  <p>Five instruments. Five places in space. One piece of music.<br>Drop a MIDI file anywhere, or</p>
+  <button id="btn-open">LOAD MIDI</button>
+</div>
+<input type="file" id="file-input" accept=".mid,.midi,audio/midi" style="display:none">
+
+<section class="panel" id="track-panel">
+  <header id="track-head"><span class="ttl">TRACKS</span><span class="file-label" id="file-label">no file</span><button class="fold">–</button></header>
+  <div class="body" id="track-body"><div class="empty">Load a MIDI file to see its tracks.</div></div>
+</section>
+
+<section class="panel" id="tune-panel">
+  <header id="tune-head"><span class="ttl">TUNING</span><button class="fold">–</button></header>
+  <div class="body" id="tune-body">
+    <div class="row preset-row"><label>Style</label><select id="preset-select"></select></div>
+    <div id="sliders"></div>
+  </div>
+</section>
+
+<footer id="transport">
+  <button id="btn-rew" title="Back to start">&#9198;</button>
+  <button id="btn-play" title="Play / pause (space)">&#9654;</button>
+  <span id="time-label">0:00 / 0:00</span>
+  <input type="range" id="scrub" min="0" max="1000" value="0" step="1">
+  <button id="btn-mute" title="Mute synth audio (M)">&#128266;</button>
+  <span id="fps-label"></span>
+</footer>
+<div id="toast"></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { Midi } from 'https://cdn.jsdelivr.net/npm/@tonejs/midi@2.0.28/+esm';
+
+/* ============================================================
+   helpers
+============================================================ */
+const clamp = (v,a,b)=>v<a?a:(v>b?b:v);
+const lerp  = (a,b,t)=>a+(b-a)*t;
+const smooth= (cur,target,rate,dt)=>cur+(target-cur)*(1-Math.exp(-rate*dt));
+const C     = hex=>new THREE.Color(hex);
+const $     = id=>document.getElementById(id);
+const fmtT  = s=>{s=Math.max(0,s);return `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;};
+
+/* exponential attack / release envelope (carried over from v2's best idea) */
+class Env{
+  constructor(att=.012,rel=.5){this.v=0;this.target=0;this.att=att;this.rel=rel;this.hold=0;}
+  trigger(amount=1,holdSec=0){this.target=Math.max(this.target,amount);this.hold=Math.max(this.hold,holdSec);}
+  update(dt){
+    /* smooth FIRST so even sub-frame holds get one full attack frame */
+    const rate=this.v<this.target?1/this.att:1/this.rel;
+    this.v=smooth(this.v,this.target,rate,dt);
+    if(this.hold>0)this.hold-=dt;
+    if(this.hold<=0)this.target=0;
+    return this.v;
+  }
+  reset(){this.v=0;this.target=0;this.hold=0;}
+}
+
+/* ============================================================
+   live parameters (sliders write here)
+============================================================ */
+const params = {
+  bloomStrength:.55, bloomThreshold:.85, bloomRadius:.55, exposure:1.0,
+  particleDensity:.85, trailPersistence:1.1, driftSpeed:.6, fogDensity:.016,
+  intDrums:1, intBass:1, intMelody:1, intPads:1, intLead:1,
+};
+
+/* per-preset look constants (not slider-driven, but preset-driven) */
+const look = {
+  vignette:.38, grain:.045, saturation:1.0, tint:[1,1,1.04],
+  bassNoiseScale:.5, bassNoiseSpeed:.45, padSpeed:.32, padAlpha:.4,
+  starBrightness:.85, cometSize:1.0,
+};
+
+/* ============================================================
+   style presets — palettes + shader params + post settings
+============================================================ */
+const PRESETS = {
+  'Deep Space Installation':{
+    desc:'sparse, vast, restrained',
+    params:{ bloomStrength:.55, bloomThreshold:.85, bloomRadius:.55, exposure:1.0,
+             particleDensity:.85, trailPersistence:1.1, driftSpeed:.6, fogDensity:.016 },
+    look:{ vignette:.38, grain:.045, saturation:1.0, tint:[1,1,1.04],
+           bassNoiseScale:.5, bassNoiseSpeed:.45, padSpeed:.32, padAlpha:.40,
+           starBrightness:.85, cometSize:1.0 },
+    bg:'#04060c',
+    pal:{ kick:'#ff3a1f', snare:'#3ef2ff', hat:'#d8f0ff', tom:'#ff9a3d', crash:'#ffd98a',
+          bassA:'#1b2bff', bassB:'#8a2bff', bassCore:'#5d6bff',
+          melody:'#ffc34d', melodyHot:'#fff2c9',
+          padA:'#19b8a0', padB:'#6a4ab8',
+          lead:'#fff3d0', leadEdge:'#ffcf6e', star:'#bcd2ff' }
+  },
+  'Neon Club':{
+    desc:'saturated, high energy',
+    params:{ bloomStrength:.92, bloomThreshold:.72, bloomRadius:.62, exposure:1.12,
+             particleDensity:1.5, trailPersistence:.9, driftSpeed:1.2, fogDensity:.010 },
+    look:{ vignette:.27, grain:.03, saturation:1.32, tint:[1.05,.97,1.1],
+           bassNoiseScale:.72, bassNoiseSpeed:.9, padSpeed:.75, padAlpha:.5,
+           starBrightness:.5, cometSize:1.25 },
+    bg:'#0a0312',
+    pal:{ kick:'#ff1e62', snare:'#00eaff', hat:'#ffffff', tom:'#ff7a00', crash:'#ffe34d',
+          bassA:'#3a00ff', bassB:'#ff00c8', bassCore:'#7d4dff',
+          melody:'#ff9f1c', melodyHot:'#fff45e',
+          padA:'#ff2bd6', padB:'#2b6bff',
+          lead:'#9ffcff', leadEdge:'#4dd2ff', star:'#8fb7ff' }
+  },
+  'Bioluminescent':{
+    desc:'organic, deep sea, soft',
+    params:{ bloomStrength:.78, bloomThreshold:.76, bloomRadius:.7, exposure:1.02,
+             particleDensity:1.15, trailPersistence:1.7, driftSpeed:.35, fogDensity:.020 },
+    look:{ vignette:.36, grain:.06, saturation:1.05, tint:[.92,1.06,1.04],
+           bassNoiseScale:.4, bassNoiseSpeed:.3, padSpeed:.22, padAlpha:.52,
+           starBrightness:.5, cometSize:1.15 },
+    bg:'#010d12',
+    pal:{ kick:'#ff7a55', snare:'#4dffd2', hat:'#bdfce8', tom:'#ffb066', crash:'#d2ffb0',
+          bassA:'#16327f', bassB:'#17b8a6', bassCore:'#46e0cd',
+          melody:'#7dffcf', melodyHot:'#eefff8',
+          padA:'#12a98e', padB:'#2a5cd0',
+          lead:'#bfffe9', leadEdge:'#54e0b8', star:'#a8e0d8' }
+  },
+  'Minimal Mono':{
+    desc:'single hue, geometric',
+    params:{ bloomStrength:.55, bloomThreshold:.9, bloomRadius:.4, exposure:1.12,
+             particleDensity:.7, trailPersistence:.8, driftSpeed:.25, fogDensity:.012 },
+    look:{ vignette:.45, grain:.08, saturation:.15, tint:[1,1,1],
+           bassNoiseScale:.55, bassNoiseSpeed:.4, padSpeed:.25, padAlpha:.4,
+           starBrightness:.85, cometSize:.9 },
+    bg:'#000000',
+    pal:{ kick:'#e8efff', snare:'#ffffff', hat:'#dfe7f8', tom:'#9eb2d8', crash:'#f2f6ff',
+          bassA:'#3a4a6e', bassB:'#8aa0cc', bassCore:'#c0d2f5',
+          melody:'#e8efff', melodyHot:'#ffffff',
+          padA:'#2e3a55', padB:'#56688e',
+          lead:'#ffffff', leadEdge:'#b8c8e8', star:'#c4d2ea' }
+  }
+};
+
+/* live palette: THREE.Color instances every material samples from */
+const pal = {};
+function loadPalette(p){ for(const k in p) pal[k] ? pal[k].set(p[k]) : pal[k]=C(p[k]); }
+loadPalette(PRESETS['Deep Space Installation'].pal);
+
+/* ============================================================
+   global state
+============================================================ */
+const state = {
+  time:0, playing:false, duration:0, loaded:false,
+  energy:0,            /* running excitement, drives the anti-whiteout governor */
+  globalGain:1,        /* 1/(1+k·energy) — multiplies every emissive */
+  shake:0,             /* kick camera impulse */
+  midi:null, fileName:'',
+  tracks:[],           /* per-track ui + assignment info */
+  roleNotes:{drums:[],bass:[],melody:[],pads:[],lead:[]},
+  rolePtr:{drums:0,bass:0,melody:0,pads:0,lead:0},
+};
+
+/* ============================================================
+   GLSL — ashima 3D simplex noise (public domain) + fbm
+============================================================ */
+const NOISE_GLSL = `
+vec3 mod289(vec3 x){return x-floor(x*(1.0/289.0))*289.0;}
+vec4 mod289(vec4 x){return x-floor(x*(1.0/289.0))*289.0;}
+vec4 permute(vec4 x){return mod289(((x*34.0)+1.0)*x);}
+vec4 taylorInvSqrt(vec4 r){return 1.79284291400159-0.85373472095314*r;}
+float snoise(vec3 v){
+  const vec2 Cc=vec2(1.0/6.0,1.0/3.0);
+  const vec4 D=vec4(0.0,0.5,1.0,2.0);
+  vec3 i=floor(v+dot(v,Cc.yyy));
+  vec3 x0=v-i+dot(i,Cc.xxx);
+  vec3 g=step(x0.yzx,x0.xyz);
+  vec3 l=1.0-g;
+  vec3 i1=min(g.xyz,l.zxy);
+  vec3 i2=max(g.xyz,l.zxy);
+  vec3 x1=x0-i1+Cc.xxx;
+  vec3 x2=x0-i2+Cc.yyy;
+  vec3 x3=x0-D.yyy;
+  i=mod289(i);
+  vec4 p=permute(permute(permute(i.z+vec4(0.0,i1.z,i2.z,1.0))+i.y+vec4(0.0,i1.y,i2.y,1.0))+i.x+vec4(0.0,i1.x,i2.x,1.0));
+  float n_=0.142857142857;
+  vec3 ns=n_*D.wyz-D.xzx;
+  vec4 j=p-49.0*floor(p*ns.z*ns.z);
+  vec4 x_=floor(j*ns.z);
+  vec4 y_=floor(j-7.0*x_);
+  vec4 x=x_*ns.x+ns.yyyy;
+  vec4 y=y_*ns.x+ns.yyyy;
+  vec4 h=1.0-abs(x)-abs(y);
+  vec4 b0=vec4(x.xy,y.xy);
+  vec4 b1=vec4(x.zw,y.zw);
+  vec4 s0=floor(b0)*2.0+1.0;
+  vec4 s1=floor(b1)*2.0+1.0;
+  vec4 sh=-step(h,vec4(0.0));
+  vec4 a0=b0.xzyw+s0.xzyw*sh.xxyy;
+  vec4 a1=b1.xzyw+s1.xzyw*sh.zzww;
+  vec3 p0=vec3(a0.xy,h.x);
+  vec3 p1=vec3(a0.zw,h.y);
+  vec3 p2=vec3(a1.xy,h.z);
+  vec3 p3=vec3(a1.zw,h.w);
+  vec4 norm=taylorInvSqrt(vec4(dot(p0,p0),dot(p1,p1),dot(p2,p2),dot(p3,p3)));
+  p0*=norm.x;p1*=norm.y;p2*=norm.z;p3*=norm.w;
+  vec4 m=max(0.6-vec4(dot(x0,x0),dot(x1,x1),dot(x2,x2),dot(x3,x3)),0.0);
+  m=m*m;
+  return 42.0*dot(m*m,vec4(dot(p0,x0),dot(p1,x1),dot(p2,x2),dot(p3,x3)));
+}
+float fbm(vec3 p){
+  float f=0.0,a=0.5;
+  for(int i=0;i<2;i++){f+=a*snoise(p);p*=2.07;a*=0.5;}
+  return f;
+}`;
+
+/* ============================================================
+   shared uniforms — one object, every material references it,
+   updated once per frame
+============================================================ */
+const U = {
+  time:{value:0},
+  fog:{value:params.fogDensity},      /* additive materials fade with depth: exp(-fog·depth) */
+  gain:{value:1},                     /* anti-whiteout governor, 1/(1+k·energy) */
+};
+/* depth-fade chunk for additive world-space shaders */
+const FOG_GLSL = `
+uniform float uFog;
+float depthFade(float viewZ){ return exp(-uFog*max(0.0,-viewZ-12.0)*1.35); }`;
+
+/* ============================================================
+   renderer / scene / camera
+============================================================ */
+/* antialias off: the scene renders into the composer's non-MSAA target anyway */
+const renderer = new THREE.WebGLRenderer({antialias:false,powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,1.5));
+renderer.setSize(innerWidth,innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = params.exposure;
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = C(PRESETS['Deep Space Installation'].bg);
+
+const camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, .1, 500);
+const camBase   = new THREE.Vector3(0,4,36);
+const camTarget = new THREE.Vector3(0,3,0);
+camera.position.copy(camBase);
+camera.lookAt(camTarget);
+
+let driftPhase=0;
+function updateCamera(wall,dt){
+  driftPhase += params.driftSpeed*dt;   /* phase accumulates: drift slider changes rate, never teleports */
+  const ph = driftPhase;
+  state.shake = Math.max(0, state.shake - dt*3.4);
+  const sh = state.shake*state.shake;
+  camera.position.x = camBase.x + Math.sin(ph*.050+.8)*4.6;
+  camera.position.y = camBase.y + Math.sin(ph*.033+1.7)*2.3;
+  camera.position.z = camBase.z + Math.cos(ph*.041)*3.2 - sh*1.5;
+  camTarget.x = Math.sin(ph*.021)*2.0;
+  camTarget.y = 3 + Math.sin(ph*.027+.5)*1.1;
+  camera.lookAt(camTarget);
+}
+
+/* ============================================================
+   post chain: render → threshold bloom → ACES/sRGB → grade
+   (grade runs in display space: vignette, grain, sat, tint)
+============================================================ */
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene,camera));
+
+const bloom = new UnrealBloomPass(
+  new THREE.Vector2(innerWidth,innerHeight),
+  params.bloomStrength, params.bloomRadius, params.bloomThreshold);
+composer.addPass(bloom);
+
+composer.addPass(new OutputPass());
+
+const GradeShader = {
+  uniforms:{
+    tDiffuse:{value:null}, uTime:{value:0},
+    uVignette:{value:look.vignette}, uGrain:{value:look.grain},
+    uSaturation:{value:look.saturation},
+    uTint:{value:new THREE.Vector3(look.tint[0],look.tint[1],look.tint[2])},
+  },
+  vertexShader:`varying vec2 vUv;
+    void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+  fragmentShader:`
+    uniform sampler2D tDiffuse;
+    uniform float uTime,uVignette,uGrain,uSaturation;
+    uniform vec3 uTint;
+    varying vec2 vUv;
+    float hash(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
+    void main(){
+      vec3 col = texture2D(tDiffuse,vUv).rgb;
+      col *= uTint;
+      float l = dot(col,vec3(0.2126,0.7152,0.0722));
+      col = max(vec3(0.0), mix(vec3(l),col,uSaturation));
+      vec2 q = vUv-0.5;
+      col *= clamp(1.0-uVignette*dot(q,q)*2.6, 0.0, 1.0);
+      col += (hash(vUv*vec2(917.3,531.7)+fract(uTime*61.0)*vec2(173.1,289.7))-0.5)*uGrain;
+      gl_FragColor = vec4(clamp(col,0.0,1.0),1.0);
+    }`
+};
+const grade = new ShaderPass(GradeShader);
+composer.addPass(grade);
+
+addEventListener('resize',()=>{
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+  composer.setSize(innerWidth,innerHeight);
+});
+
+/* ============================================================
+   starfield — quiet, twinkling, on a far shell
+============================================================ */
+const stars = (()=>{
+  const N = 1500;
+  const pos = new Float32Array(N*3), phase = new Float32Array(N), size = new Float32Array(N);
+  for(let i=0;i<N;i++){
+    /* random direction, radius 90–180 */
+    const u=Math.random()*2-1, th=Math.random()*Math.PI*2, r=90+Math.random()*90;
+    const s=Math.sqrt(1-u*u);
+    pos[i*3]=s*Math.cos(th)*r; pos[i*3+1]=u*r*.85; pos[i*3+2]=s*Math.sin(th)*r;
+    phase[i]=Math.random(); size[i]=.6+Math.random()*1.8;
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  g.setAttribute('aPhase',new THREE.BufferAttribute(phase,1));
+  g.setAttribute('aSize',new THREE.BufferAttribute(size,1));
+  const m=new THREE.ShaderMaterial({
+    uniforms:{ uTime:U.time, uGain:U.gain, uColor:{value:pal.star}, uBrightness:{value:look.starBrightness},
+               uPixelRatio:{value:renderer.getPixelRatio()} },
+    vertexShader:`
+      attribute float aPhase; attribute float aSize;
+      uniform float uTime,uPixelRatio;
+      varying float vTw;
+      void main(){
+        vec4 mv = modelViewMatrix*vec4(position,1.0);
+        vTw = 0.5+0.5*sin(uTime*(0.35+aPhase*0.8)+aPhase*6.2831);
+        gl_PointSize = aSize*uPixelRatio*(140.0/max(1.0,-mv.z));
+        gl_Position = projectionMatrix*mv;
+      }`,
+    fragmentShader:`
+      uniform vec3 uColor; uniform float uBrightness,uGain;
+      varying float vTw;
+      void main(){
+        float a = smoothstep(0.5,0.0,length(gl_PointCoord-0.5));
+        a *= a;
+        gl_FragColor = vec4(uColor*(0.35+0.65*vTw)*uBrightness*uGain*a, 1.0);
+      }`,
+    transparent:true, depthWrite:false, blending:THREE.AdditiveBlending
+  });
+  const pts=new THREE.Points(g,m);
+  pts.frustumCulled=false;
+  scene.add(pts);
+  return {mat:m};
+})();
+
+/* per-instrument intensity uniforms (animate() copies params.int* in) */
+const INT = { drums:{value:1}, bass:{value:1}, melody:{value:1}, pads:{value:1}, lead:{value:1} };
+
+/* ============================================================
+   ParticlePool — CPU-simulated point sprites, zero allocation
+   after construction; one draw call per pool
+============================================================ */
+class ParticlePool{
+  constructor(cap, intensity){
+    this.cap=cap; this.head=0;
+    this.vel  = new Float32Array(cap*3);
+    this.life = new Float32Array(cap);
+    this.maxL = new Float32Array(cap);
+    this.drag = new Float32Array(cap);
+    this.grav = new Float32Array(cap);
+    const pos = new Float32Array(cap*3);
+    const col = new Float32Array(cap*3);
+    const sz  = new Float32Array(cap);
+    const t   = new Float32Array(cap);
+    const g = this.geo = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos,3).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute('aColor',   new THREE.BufferAttribute(col,3).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute('aSize',    new THREE.BufferAttribute(sz,1).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute('aT',       new THREE.BufferAttribute(t,1).setUsage(THREE.DynamicDrawUsage));
+    this.live=0;
+    this.mat = new THREE.ShaderMaterial({
+      uniforms:{ uPixelRatio:{value:renderer.getPixelRatio()}, uGain:U.gain, uFog:U.fog,
+                 uIntensity:intensity, uSizeMul:{value:1} },
+      vertexShader:`
+        attribute vec3 aColor; attribute float aSize,aT;
+        uniform float uPixelRatio,uSizeMul;
+        varying vec3 vCol; varying float vT,vZ;
+        void main(){
+          vec4 mv = modelViewMatrix*vec4(position,1.0);
+          vZ=mv.z; vCol=aColor; vT=aT;
+          gl_PointSize = aSize*uSizeMul*(0.55+0.45*aT)*uPixelRatio*(160.0/max(1.0,-mv.z))*step(0.001,aT);
+          gl_Position = projectionMatrix*mv;
+        }`,
+      fragmentShader: FOG_GLSL+`
+        uniform float uGain,uIntensity;
+        varying vec3 vCol; varying float vT,vZ;
+        void main(){
+          if(vT<=0.001) discard;
+          float d = length(gl_PointCoord-0.5);
+          float a = smoothstep(0.5,0.04,d);
+          gl_FragColor = vec4(vCol*uIntensity*uGain*a*vT*vT*depthFade(vZ), 1.0);
+        }`,
+      transparent:true, depthWrite:false, depthTest:true, blending:THREE.AdditiveBlending
+    });
+    this.points = new THREE.Points(g,this.mat);
+    this.points.frustumCulled = false;
+    scene.add(this.points);
+  }
+  spawn(x,y,z, vx,vy,vz, life,size, color,bright, drag=0,grav=0){
+    const i=this.head; this.head=(this.head+1)%this.cap;
+    if(this.life[i]<=0) this.live++;
+    const p=this.geo.attributes.position.array, c=this.geo.attributes.aColor.array;
+    p[i*3]=x; p[i*3+1]=y; p[i*3+2]=z;
+    this.vel[i*3]=vx; this.vel[i*3+1]=vy; this.vel[i*3+2]=vz;
+    c[i*3]=color.r*bright; c[i*3+1]=color.g*bright; c[i*3+2]=color.b*bright;
+    this.geo.attributes.aSize.array[i]=size;
+    this.life[i]=this.maxL[i]=life;
+    this.drag[i]=drag; this.grav[i]=grav;
+    this.geo.attributes.aSize.needsUpdate=true;
+    this.geo.attributes.aColor.needsUpdate=true;
+  }
+  update(dt){
+    if(this.live===0) return;    /* idle pools cost nothing */
+    const p=this.geo.attributes.position.array, t=this.geo.attributes.aT.array, v=this.vel;
+    for(let i=0;i<this.cap;i++){
+      if(this.life[i]<=0){ t[i]=0; continue; }
+      this.life[i]-=dt;
+      if(this.life[i]<=0){ t[i]=0; this.live--; continue; }
+      const dr=1-this.drag[i]*dt;
+      v[i*3]*=dr; v[i*3+1]=v[i*3+1]*dr-this.grav[i]*dt; v[i*3+2]*=dr;
+      p[i*3]+=v[i*3]*dt; p[i*3+1]+=v[i*3+1]*dt; p[i*3+2]+=v[i*3+2]*dt;
+      t[i]=this.life[i]/this.maxL[i];
+    }
+    this.geo.attributes.position.needsUpdate=true;
+    this.geo.attributes.aT.needsUpdate=true;
+  }
+  reset(){ this.live=0; this.life.fill(0); this.geo.attributes.aT.array.fill(0); this.geo.attributes.aT.needsUpdate=true; }
+}
+
+/* ============================================================
+   DRUMS — fixed at centre. kick: deep red pressure shell,
+   snare: cyan shockwave ring, hats: sparks, toms: warm pulses,
+   crash/ride: gold shimmer ring + burst
+============================================================ */
+const DRUM_POS = new THREE.Vector3(0,2.5,0);
+
+function drumType(n){
+  if(n===35||n===36) return 'kick';
+  if(n===37||n===38||n===39||n===40) return 'snare';
+  if(n===42||n===44||n===46) return 'hat';
+  if(n===49||n===51||n===52||n===53||n===55||n===57||n===59) return 'crash';
+  if(n>=41&&n<=50) return 'tom';
+  return 'perc';
+}
+
+/* billboard pulse quads — thin ring (snare/crash) or soft
+   pressure wave (kick/tom), selected per shot via uSoft */
+const rings = (()=>{
+  const N=10, items=[];
+  const geo = new THREE.PlaneGeometry(2,2);
+  for(let i=0;i<N;i++){
+    const mat = new THREE.ShaderMaterial({
+      uniforms:{ uGain:U.gain, uFog:U.fog, uIntensity:INT.drums,
+                 uLife:{value:0}, uBright:{value:1}, uSoft:{value:0}, uColor:{value:new THREE.Color()} },
+      vertexShader:`
+        varying vec2 vP; varying float vZ;
+        void main(){
+          vP = position.xy;
+          vec4 mv = modelViewMatrix*vec4(position,1.0);
+          vZ = mv.z;
+          gl_Position = projectionMatrix*mv;
+        }`,
+      fragmentShader: FOG_GLSL+`
+        uniform float uLife,uBright,uSoft,uGain,uIntensity;
+        uniform vec3 uColor;
+        varying vec2 vP; varying float vZ;
+        void main(){
+          float r = length(vP);
+          float R = pow(1.0-uLife, 0.55)*0.92;
+          float d = abs(r-R);
+          float thin = exp(-d*30.0) + exp(-d*7.0)*0.28;
+          float soft = exp(-d*6.5)*0.9 + exp(-r*2.8)*0.30*uLife;
+          float ring = mix(thin, soft, uSoft);
+          float a = ring * pow(uLife,1.35) * uBright * smoothstep(1.0,0.86,r);
+          if(a<0.004) discard;   /* skip dead quad area: ROP traffic, not ALU, is the cost */
+          gl_FragColor = vec4(uColor*a*1.5*uGain*uIntensity*depthFade(vZ), 1.0);
+        }`,
+      transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.DoubleSide
+    });
+    const mesh = new THREE.Mesh(geo,mat);
+    mesh.position.copy(DRUM_POS);
+    mesh.visible=false; mesh.frustumCulled=false;
+    scene.add(mesh);
+    items.push({mesh,mat,life:0,decay:1.5});
+  }
+  let head=0;
+  return {
+    fire(vel,color,{big=false,soft=false}={}){
+      const w=items[head]; head=(head+1)%N;
+      w.life=1; w.decay=soft?(big?1.7:2.2):(big?0.95:1.5);
+      w.mat.uniforms.uColor.value.copy(color);
+      w.mat.uniforms.uBright.value=(.5+.9*vel)*(soft?.78:1);
+      w.mat.uniforms.uSoft.value=soft?1:0;
+      w.mesh.scale.setScalar(soft?(big?7.5:5):(big?11:8));
+      w.mesh.visible=true;
+    },
+    update(dt){
+      for(const w of items){
+        if(w.life<=0){ w.mesh.visible=false; continue; }
+        w.life=Math.max(0,w.life-dt*w.decay);
+        w.mat.uniforms.uLife.value=w.life;
+        w.mesh.quaternion.copy(camera.quaternion);
+      }
+    },
+    reset(){ for(const w of items){ w.life=0; w.mesh.visible=false; } }
+  };
+})();
+
+/* drum core — small breathing heart that flashes on the kick */
+const drumCore = (()=>{
+  const mat = new THREE.ShaderMaterial({
+    uniforms:{ uTime:U.time, uGain:U.gain, uFog:U.fog, uIntensity:INT.drums,
+               uEnv:{value:0}, uColor:{value:pal.kick} },
+    vertexShader:NOISE_GLSL+`
+      uniform float uTime,uEnv;
+      varying vec3 vN,vV; varying float vZ;
+      void main(){
+        vec3 p = position*(1.0+uEnv*0.32) + normal*snoise(normal*3.0+uTime*0.7)*0.05;
+        vec4 mv = modelViewMatrix*vec4(p,1.0);
+        vZ=mv.z;
+        vN=normalize(normalMatrix*normal);
+        vV=normalize(-mv.xyz);
+        gl_Position=projectionMatrix*mv;
+      }`,
+    fragmentShader: FOG_GLSL+`
+      uniform float uTime,uEnv,uGain,uIntensity;
+      uniform vec3 uColor;
+      varying vec3 vN,vV; varying float vZ;
+      void main(){
+        float fres = pow(1.0-abs(dot(normalize(vN),normalize(vV))),1.9);
+        vec3 idle = vec3(0.10,0.13,0.22)*(0.5+0.22*sin(uTime*0.9));
+        vec3 hot  = uColor*pow(uEnv,1.15)*1.5;
+        vec3 col  = idle*(fres*0.9+0.12) + hot*(fres*0.75+0.3);
+        gl_FragColor = vec4(col*uGain*uIntensity*depthFade(vZ), 1.0);
+      }`,
+    transparent:true, depthWrite:false, blending:THREE.AdditiveBlending
+  });
+  const mesh = new THREE.Mesh(new THREE.IcosahedronGeometry(1.05,4), mat);
+  mesh.position.copy(DRUM_POS);
+  scene.add(mesh);
+  const env = new Env(.006,.30);
+  return { env, mat,
+    update(dt){ mat.uniforms.uEnv.value = env.update(dt); },
+    reset(){ env.reset(); mat.uniforms.uEnv.value=0; } };
+})();
+
+/* spark pool for hats / crash / misc percussion */
+const drumSparks = new ParticlePool(1600, INT.drums);
+
+const drums = {
+  onNote(n){
+    const v=n.velocity, den=params.particleDensity;
+    switch(drumType(n.midi)){
+      case 'kick':
+        rings.fire(v, pal.kick, {soft:true, big:true});
+        drumCore.env.trigger(.5+.6*v);
+        state.shake = Math.max(state.shake, .22+.4*v);
+        break;
+      case 'snare':
+        rings.fire(v, pal.snare);
+        break;
+      case 'hat':{
+        const count = Math.round((6+10*v)*den);
+        for(let i=0;i<count;i++){
+          const a=Math.random()*Math.PI*2, sp=2.2+Math.random()*5.5*(.4+v);
+          drumSparks.spawn(
+            DRUM_POS.x+(Math.random()-.5)*1.2, DRUM_POS.y+2.4+Math.random()*.8, DRUM_POS.z+(Math.random()-.5)*1.2,
+            Math.cos(a)*sp, 1.5+Math.random()*3.5, Math.sin(a)*sp,
+            (.30+Math.random()*.35)*params.trailPersistence, .9+Math.random()*1.3,
+            pal.hat, .5+.7*v, 1.6, 5.5);
+        }
+        break;}
+      case 'crash':{
+        rings.fire(v*.85, pal.crash, {big:true});
+        const count = Math.round((16+14*v)*den);
+        for(let i=0;i<count;i++){
+          const a=Math.random()*Math.PI*2, el=Math.random()*Math.PI-Math.PI/2, sp=3+Math.random()*7;
+          drumSparks.spawn(
+            DRUM_POS.x, DRUM_POS.y+1.5, DRUM_POS.z,
+            Math.cos(a)*Math.cos(el)*sp, Math.abs(Math.sin(el))*sp*.9+1.2, Math.sin(a)*Math.cos(el)*sp,
+            (.7+Math.random()*.9)*params.trailPersistence, 1.0+Math.random()*1.6,
+            pal.crash, .4+.55*v, 1.1, 2.2);
+        }
+        break;}
+      case 'tom':
+        rings.fire(v*.8, pal.tom, {soft:true});
+        break;
+      default:{ /* misc percussion → a few neutral sparks */
+        const count=Math.round(4*den);
+        for(let i=0;i<count;i++){
+          const a=Math.random()*Math.PI*2;
+          drumSparks.spawn(DRUM_POS.x,DRUM_POS.y+1,DRUM_POS.z,
+            Math.cos(a)*3,Math.random()*2,Math.sin(a)*3,
+            .35,.8, pal.hat,.45,1.5,4);
+        }
+      }
+    }
+  },
+  update(dt){ rings.update(dt); drumCore.update(dt); drumSparks.update(dt); },
+  reset(){ rings.reset(); drumCore.reset(); drumSparks.reset(); }
+};
+
+const pitch01 = (m,lo=30,hi=96)=>clamp((m-lo)/(hi-lo),0,1);
+
+/* ============================================================
+   BASS — low-forward organic mass, noise-displaced, breathing
+============================================================ */
+const bass = (()=>{
+  const POS = new THREE.Vector3(0,-7,10);
+  const env = new Env(.045,.85);
+  const massMat = new THREE.ShaderMaterial({
+    uniforms:{ uTime:U.time, uGain:U.gain, uFog:U.fog, uIntensity:INT.bass,
+      uAmp:{value:0}, uPitch:{value:.3},
+      uScale:{value:look.bassNoiseScale}, uSpeed:{value:look.bassNoiseSpeed},
+      uColA:{value:pal.bassA}, uColB:{value:pal.bassB} },
+    vertexShader:NOISE_GLSL+`
+      uniform float uTime,uAmp,uScale,uSpeed;
+      varying vec3 vN,vV; varying float vZ,vNz1,vNz2;
+      float dispFrom(float n1,float n2){
+        float breathe = 0.07+0.04*sin(uTime*0.45);
+        return breathe + uAmp*0.14 + uAmp*(0.22*n1+0.10*n2);
+      }
+      float dispAt(vec3 d){
+        float n1 = snoise(d*(1.5+uScale*2.0) + vec3(0.0,uTime*uSpeed,0.0));
+        float n2 = snoise(d*(3.4+uScale*3.0) - vec3(uTime*uSpeed*0.7));
+        return dispFrom(n1,n2);
+      }
+      void main(){
+        vec3 dir = normalize(position);
+        vNz1 = snoise(dir*(1.5+uScale*2.0) + vec3(0.0,uTime*uSpeed,0.0));
+        vNz2 = snoise(dir*(3.4+uScale*3.0) - vec3(uTime*uSpeed*0.7));
+        float R = length(position);
+        vec3 p = dir*R*(1.0+dispFrom(vNz1,vNz2));
+        /* recompute the displaced normal from two tangent samples,
+           so lobes catch light instead of looking crumpled */
+        vec3 up = abs(dir.y)>0.94 ? vec3(1.0,0.0,0.0) : vec3(0.0,1.0,0.0);
+        vec3 t1 = normalize(cross(dir,up));
+        vec3 t2 = normalize(cross(dir,t1));
+        float e = 0.07;
+        vec3 d1 = normalize(dir+t1*e);
+        vec3 d2 = normalize(dir+t2*e);
+        vec3 p1 = d1*R*(1.0+dispAt(d1));
+        vec3 p2 = d2*R*(1.0+dispAt(d2));
+        vec3 nrm = normalize(cross(p2-p, p1-p));
+        if(dot(nrm,dir)<0.0) nrm=-nrm;
+        vec4 mv = modelViewMatrix*vec4(p,1.0);
+        vZ=mv.z;
+        vN=normalize(normalMatrix*nrm);
+        vV=normalize(-mv.xyz);
+        gl_Position=projectionMatrix*mv;
+      }`,
+    fragmentShader: FOG_GLSL+`
+      uniform float uAmp,uPitch,uGain,uIntensity;
+      uniform vec3 uColA,uColB;
+      varying vec3 vN,vV; varying float vZ,vNz1,vNz2;
+      void main(){
+        float fres = pow(1.0-abs(dot(normalize(vN),normalize(vV))), 2.0);
+        vec3 base = mix(uColA,uColB, clamp(vNz1*0.45+0.5+uPitch*0.35, 0.0, 1.0));
+        float vein = smoothstep(0.45,0.95,abs(vNz2))*(0.25+0.75*uAmp);
+        vec3 col = base*0.05
+                 + base*fres*(0.45+1.4*uAmp)
+                 + base*vein*0.6;
+        gl_FragColor = vec4(col*uGain*uIntensity*depthFade(vZ), 1.0);
+      }`,
+    blending:THREE.NormalBlending, transparent:false
+  });
+  const mass = new THREE.Mesh(new THREE.IcosahedronGeometry(3.1,4), massMat);
+  mass.position.copy(POS);
+  scene.add(mass);
+
+  /* inner glow heart */
+  const coreMat = new THREE.ShaderMaterial({
+    uniforms:{ uTime:U.time, uGain:U.gain, uFog:U.fog, uIntensity:INT.bass,
+               uAmp:{value:0}, uColor:{value:pal.bassCore} },
+    vertexShader:`
+      varying vec3 vN,vV; varying float vZ;
+      void main(){
+        vec4 mv=modelViewMatrix*vec4(position,1.0);
+        vZ=mv.z; vN=normalize(normalMatrix*normal); vV=normalize(-mv.xyz);
+        gl_Position=projectionMatrix*mv;
+      }`,
+    fragmentShader: FOG_GLSL+`
+      uniform float uAmp,uGain,uIntensity; uniform vec3 uColor;
+      varying vec3 vN,vV; varying float vZ;
+      void main(){
+        float fres=pow(1.0-abs(dot(normalize(vN),normalize(vV))),1.6);
+        float a=(0.10+1.5*uAmp)*(fres*0.8+0.2);
+        gl_FragColor=vec4(uColor*a*uGain*uIntensity*depthFade(vZ),1.0);
+      }`,
+    transparent:true, depthWrite:false, depthTest:false, blending:THREE.AdditiveBlending
+  });
+  const core = new THREE.Mesh(new THREE.IcosahedronGeometry(1.7,3), coreMat);
+  core.position.copy(POS);
+  core.renderOrder=1;            /* draw after the opaque mass so the glow bleeds through */
+  scene.add(core);
+
+  let pitchTarget=.3;
+  return {
+    onNote(n){
+      env.trigger(.4+.6*n.velocity, Math.min(n.duration||.3, 4));
+      pitchTarget = pitch01(n.midi, 24, 60);
+    },
+    update(dt){
+      const e = env.update(dt);
+      massMat.uniforms.uAmp.value = e;
+      coreMat.uniforms.uAmp.value = e;
+      massMat.uniforms.uPitch.value = smooth(massMat.uniforms.uPitch.value, pitchTarget, 6, dt);
+      mass.rotation.y += dt*.05;
+      /* the mass is opaque: at intensity ~0 it would silhouette, so hide it */
+      mass.visible = core.visible = params.intBass>0.02;
+    },
+    reset(){ env.reset(); massMat.uniforms.uAmp.value=0; coreMat.uniforms.uAmp.value=0; },
+    mats:{massMat,coreMat}
+  };
+})();
+
+/* ============================================================
+   MELODY — upper-right comet swarm; pitch → height,
+   velocity → brightness/speed, duration → trail length
+============================================================ */
+const melody = (()=>{
+  const ZONE = new THREE.Vector3(15,11,-4);
+  const MAXC = 16;
+  const comets = Array.from({length:MAXC},()=>({
+    active:false, pos:new THREE.Vector3(), vel:new THREE.Vector3(),
+    life:0, maxLife:1, bright:1, phase:0, emitAcc:0
+  }));
+  const trail = new ParticlePool(6000, INT.melody);
+
+  /* dedicated head sprites */
+  const headGeo = new THREE.BufferGeometry();
+  headGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAXC*3),3).setUsage(THREE.DynamicDrawUsage));
+  headGeo.setAttribute('aColor',   new THREE.BufferAttribute(new Float32Array(MAXC*3),3).setUsage(THREE.DynamicDrawUsage));
+  headGeo.setAttribute('aSize',    new THREE.BufferAttribute(new Float32Array(MAXC),1).setUsage(THREE.DynamicDrawUsage));
+  headGeo.setAttribute('aT',       new THREE.BufferAttribute(new Float32Array(MAXC),1).setUsage(THREE.DynamicDrawUsage));
+  const heads = new THREE.Points(headGeo, new THREE.ShaderMaterial({
+    uniforms:{ uPixelRatio:{value:renderer.getPixelRatio()}, uGain:U.gain, uFog:U.fog,
+               uIntensity:INT.melody, uSizeMul:{value:look.cometSize} },
+    vertexShader: trailHeadVertex(), fragmentShader: trailHeadFragment(),
+    transparent:true, depthWrite:false, blending:THREE.AdditiveBlending
+  }));
+  heads.frustumCulled=false;
+  scene.add(heads);
+  function trailHeadVertex(){return `
+    attribute vec3 aColor; attribute float aSize,aT;
+    uniform float uPixelRatio,uSizeMul;
+    varying vec3 vCol; varying float vT,vZ;
+    void main(){
+      vec4 mv=modelViewMatrix*vec4(position,1.0);
+      vZ=mv.z; vCol=aColor; vT=aT;
+      gl_PointSize=aSize*uSizeMul*uPixelRatio*(160.0/max(1.0,-mv.z))*step(0.001,aT);
+      gl_Position=projectionMatrix*mv;
+    }`;}
+  function trailHeadFragment(){return FOG_GLSL+`
+    uniform float uGain,uIntensity;
+    varying vec3 vCol; varying float vT,vZ;
+    void main(){
+      if(vT<=0.001) discard;
+      float d=length(gl_PointCoord-0.5);
+      float core=smoothstep(0.18,0.0,d)*1.4;
+      float halo=smoothstep(0.5,0.06,d)*0.5;
+      gl_FragColor=vec4(vCol*(core+halo)*vT*uGain*uIntensity*depthFade(vZ),1.0);
+    }`;}
+
+  const tmpC = new THREE.Color();
+  return {
+    onNote(n){
+      /* if the pool is full, steal the comet closest to fading anyway */
+      const c = comets.find(c=>!c.active) || comets.reduce((m,x)=>x.life<m.life?x:m,comets[0]);
+      c.active=true;
+      const h = pitch01(n.midi,48,96);
+      c.pos.set(ZONE.x+(Math.random()-.5)*9, ZONE.y-7+h*16, ZONE.z+(Math.random()-.5)*6);
+      c.vel.set(-(1.4+1.9*n.velocity), (Math.random()-.5)*1.6, (Math.random()-.5)*1.2);
+      c.maxLife = c.life = clamp(n.duration||.3,.35,2.8)+1.3;
+      c.bright = .55+.85*n.velocity;
+      c.phase = Math.random()*Math.PI*2;
+      c.emitAcc = 0;
+    },
+    update(dt,wall){
+      const hp=headGeo.attributes.position.array, hc=headGeo.attributes.aColor.array,
+            hs=headGeo.attributes.aSize.array, ht=headGeo.attributes.aT.array;
+      for(let i=0;i<MAXC;i++){
+        const c=comets[i];
+        if(!c.active){ ht[i]=0; continue; }
+        c.life-=dt;
+        if(c.life<=0){ c.active=false; ht[i]=0; continue; }
+        c.vel.y += Math.sin(wall*2.2+c.phase)*dt*1.1;
+        c.pos.addScaledVector(c.vel,dt);
+        /* trail emission */
+        c.emitAcc += dt*55*params.particleDensity;
+        const tFrac=c.life/c.maxLife;
+        while(c.emitAcc>=1){
+          c.emitAcc-=1;
+          tmpC.copy(pal.melody).lerp(pal.melodyHot, Math.random()*.4*c.bright);
+          trail.spawn(
+            c.pos.x+(Math.random()-.5)*.3, c.pos.y+(Math.random()-.5)*.3, c.pos.z+(Math.random()-.5)*.3,
+            -c.vel.x*.06+(Math.random()-.5)*.5, (Math.random()-.5)*.5, (Math.random()-.5)*.5,
+            (.55+Math.random()*.65)*params.trailPersistence, 1.2+Math.random()*1.6,
+            tmpC, .55*c.bright*tFrac+.15, .4, .25);
+        }
+        hp[i*3]=c.pos.x; hp[i*3+1]=c.pos.y; hp[i*3+2]=c.pos.z;
+        hc[i*3]=pal.melodyHot.r*c.bright*1.4; hc[i*3+1]=pal.melodyHot.g*c.bright*1.4; hc[i*3+2]=pal.melodyHot.b*c.bright*1.4;
+        hs[i]=3.4+1.4*c.bright;
+        ht[i]=Math.min(1,tFrac*2.5);
+      }
+      headGeo.attributes.position.needsUpdate=true;
+      headGeo.attributes.aColor.needsUpdate=true;
+      headGeo.attributes.aSize.needsUpdate=true;
+      headGeo.attributes.aT.needsUpdate=true;
+      trail.update(dt);
+    },
+    reset(){ comets.forEach(c=>c.active=false); trail.reset();
+             headGeo.attributes.aT.array.fill(0); headGeo.attributes.aT.needsUpdate=true; },
+    headsMat:heads.material
+  };
+})();
+
+/* ============================================================
+   PADS — volumetric cloud planes washing across the background
+============================================================ */
+const pads = (()=>{
+  const planes=[], mats=[];
+  const defs=[ {x:-26,y:10,z:-40,r:.06,s:0.0}, {x:0,y:13,z:-44,r:-.04,s:3.7}, {x:26,y:9,z:-40,r:.05,s:8.2} ];
+  for(const d of defs){
+    const mat=new THREE.ShaderMaterial({
+      uniforms:{ uTime:U.time, uGain:U.gain, uIntensity:INT.pads,
+        uEnv:{value:0}, uMix:{value:.4}, uSeed:{value:d.s},
+        uSpeed:{value:look.padSpeed}, uAlpha:{value:look.padAlpha},
+        uColA:{value:pal.padA}, uColB:{value:pal.padB} },
+      vertexShader:`
+        varying vec2 vUv;
+        void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+      /* pads intentionally skip depthFade — they ARE the background depth */
+      fragmentShader:NOISE_GLSL+`
+        uniform float uTime,uEnv,uMix,uSeed,uSpeed,uAlpha,uGain,uIntensity;
+        uniform vec3 uColA,uColB;
+        varying vec2 vUv;
+        void main(){
+          vec2 q = vUv*vec2(2.6,1.7);
+          float t = uTime*uSpeed;
+          float f  = fbm(vec3(q*1.5+uSeed, t*0.55+uSeed*7.0));
+          float f2 = snoise(vec3(q*3.0+f*0.9+uSeed*2.0, t*0.33))*0.6;
+          float cloud = smoothstep(0.05,0.95, f*0.62+f2*0.52+0.42);
+          vec3 col = mix(uColA,uColB, clamp(uMix+f2*0.65,0.0,1.0));
+          float edge = smoothstep(0.0,0.30,vUv.x)*smoothstep(1.0,0.70,vUv.x)
+                     * smoothstep(0.0,0.34,vUv.y)*smoothstep(1.0,0.66,vUv.y);
+          float a = cloud*edge*(0.07+0.95*uEnv)*uAlpha;
+          gl_FragColor = vec4(col*a*uGain*uIntensity, 1.0);
+        }`,
+      transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.DoubleSide
+    });
+    const mesh=new THREE.Mesh(new THREE.PlaneGeometry(64,42), mat);
+    mesh.position.set(d.x,d.y,d.z); mesh.rotation.z=d.r;
+    mesh.frustumCulled=false;
+    scene.add(mesh); planes.push(mesh); mats.push(mat);
+  }
+  const active=[];          /* {end, pitch} for currently sounding pad notes */
+  let env=0, mixT=.4;
+  return {
+    onNote(n){
+      active.push({end:state.time+(n.duration||1), p:pitch01(n.midi,40,88)});
+      if(active.length>24) active.shift();
+    },
+    update(dt){
+      for(let i=active.length-1;i>=0;i--) if(active[i].end<state.time) active.splice(i,1);
+      const target=clamp(active.length/2.5,0,1);
+      if(active.length){ let s=0; for(const a of active) s+=a.p; mixT=s/active.length; }
+      env = smooth(env, target, target>env?2.4:0.45, dt);
+      for(const m of mats){
+        m.uniforms.uEnv.value=env;
+        m.uniforms.uMix.value=smooth(m.uniforms.uMix.value, mixT, 1.2, dt);
+      }
+    },
+    reset(){ active.length=0; env=0; for(const m of mats) m.uniforms.uEnv.value=0; },
+    mats
+  };
+})();
+
+/* ============================================================
+   LEAD — front-centre flowing ribbon; pitch → height
+============================================================ */
+const lead = (()=>{
+  const BASE = new THREE.Vector3(0,2,14);
+  const SEG=140;
+  const hist = Array.from({length:SEG},()=>BASE.clone());
+  const env = new Env(.02,.95);
+  let yT=.35, head=BASE.clone();
+
+  const geo=new THREE.BufferGeometry();
+  const posArr=new Float32Array(SEG*2*3);
+  const tArr=new Float32Array(SEG*2);
+  const sideArr=new Float32Array(SEG*2);
+  for(let i=0;i<SEG;i++){ tArr[i*2]=tArr[i*2+1]=i/(SEG-1); sideArr[i*2]=-1; sideArr[i*2+1]=1; }
+  const idx=[];
+  for(let i=0;i<SEG-1;i++){ const a=i*2; idx.push(a,a+1,a+2, a+1,a+3,a+2); }
+  geo.setAttribute('position', new THREE.BufferAttribute(posArr,3).setUsage(THREE.DynamicDrawUsage));
+  geo.setAttribute('aT', new THREE.BufferAttribute(tArr,1));
+  geo.setAttribute('aSide', new THREE.BufferAttribute(sideArr,1));
+  geo.setIndex(idx);
+  const mat=new THREE.ShaderMaterial({
+    uniforms:{ uTime:U.time, uGain:U.gain, uFog:U.fog, uIntensity:INT.lead,
+      uEnv:{value:0}, uTrail:{value:params.trailPersistence},
+      uColA:{value:pal.lead}, uColB:{value:pal.leadEdge} },
+    vertexShader:`
+      attribute float aT,aSide;
+      varying float vT,vSide,vZ;
+      void main(){
+        vT=aT; vSide=aSide;
+        vec4 mv=modelViewMatrix*vec4(position,1.0);
+        vZ=mv.z;
+        gl_Position=projectionMatrix*mv;
+      }`,
+    fragmentShader: FOG_GLSL+`
+      uniform float uTime,uEnv,uTrail,uGain,uIntensity;
+      uniform vec3 uColA,uColB;
+      varying float vT,vSide,vZ;
+      void main(){
+        float fade = pow(1.0-vT, mix(2.4,0.85,clamp(uTrail*0.4,0.0,1.0)));
+        float across = 1.0-abs(vSide);
+        float core = smoothstep(0.0,0.55,across);
+        float streak = 0.75+0.25*sin(vT*34.0-uTime*5.0);
+        vec3 col = mix(uColB,uColA, core*fade);
+        float a = fade*core*streak*(0.03+1.25*uEnv);
+        gl_FragColor = vec4(col*a*uGain*uIntensity*depthFade(vZ),1.0);
+      }`,
+    transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.DoubleSide
+  });
+  const mesh=new THREE.Mesh(geo,mat);
+  mesh.frustumCulled=false;
+  scene.add(mesh);
+
+  const dir=new THREE.Vector3(), side=new THREE.Vector3(), camDir=new THREE.Vector3(), upv=new THREE.Vector3(0,1,0);
+  return {
+    onNote(n){
+      env.trigger(.45+.55*n.velocity, Math.min(n.duration||.3,4));
+      yT = pitch01(n.midi,48,96);
+    },
+    update(dt,wall){
+      const e=env.update(dt);
+      mat.uniforms.uEnv.value=e;
+      mat.uniforms.uTrail.value=params.trailPersistence;
+      /* invisible until a lead track actually exists — avoids a ghost beam */
+      mesh.visible = state.roleNotes.lead.length>0;
+      if(!mesh.visible) return;
+      /* head wanders; pitch sets height */
+      const yCur=hist[0].y;
+      head.set(
+        BASE.x+Math.sin(wall*.55)*8.5,
+        smooth(yCur, BASE.y-2+yT*10, 7, dt),
+        BASE.z+Math.sin(wall*.21)*1.8);
+      /* shift history (ring-free shift: cheap at 140 entries) */
+      for(let i=SEG-1;i>0;i--) hist[i].copy(hist[i-1]);
+      hist[0].copy(head);
+      camera.getWorldDirection(camDir);
+      const w0=.45+.65*e;
+      for(let i=0;i<SEG;i++){
+        const p=hist[i];
+        const prev=hist[Math.max(0,i-1)], next=hist[Math.min(SEG-1,i+1)];
+        dir.subVectors(next,prev);
+        if(dir.lengthSq()<1e-8) dir.set(1,0,0);
+        side.crossVectors(dir,camDir);
+        if(side.lengthSq()<1e-6) side.crossVectors(dir,upv);   /* dir ∥ camDir fallback */
+        side.normalize();
+        const w=(w0*Math.pow(1-i/(SEG-1),.7)+.04);
+        posArr[(i*2)*3  ]=p.x-side.x*w; posArr[(i*2)*3+1]=p.y-side.y*w; posArr[(i*2)*3+2]=p.z-side.z*w;
+        posArr[(i*2+1)*3]=p.x+side.x*w; posArr[(i*2+1)*3+1]=p.y+side.y*w; posArr[(i*2+1)*3+2]=p.z+side.z*w;
+      }
+      geo.attributes.position.needsUpdate=true;
+    },
+    reset(){ env.reset(); mat.uniforms.uEnv.value=0; for(const p of hist) p.copy(BASE); },
+    mat
+  };
+})();
+
+/* entity registry + note dispatch (adds to the energy governor) */
+const entities={drums,bass,melody,pads,lead};
+const ROLE_ENERGY={drums:.85,bass:.65,melody:.45,pads:.3,lead:.55};
+function fireNote(role,n){
+  state.energy += n.velocity*ROLE_ENERGY[role];
+  entities[role].onNote(n);
+  audio.trigger(role,n);
+}
+
+/* ============================================================
+   MIDI — load, classify (channel + GM program + name + stats),
+   track panel with live manual role reassignment
+============================================================ */
+const GM_NAMES=[
+'Grand Piano','Bright Piano','Electric Grand','Honky-tonk','E.Piano 1','E.Piano 2','Harpsichord','Clavinet',
+'Celesta','Glockenspiel','Music Box','Vibraphone','Marimba','Xylophone','Tubular Bells','Dulcimer',
+'Drawbar Organ','Perc. Organ','Rock Organ','Church Organ','Reed Organ','Accordion','Harmonica','Tango Accordion',
+'Nylon Guitar','Steel Guitar','Jazz Guitar','Clean Guitar','Muted Guitar','Overdrive Gtr','Distortion Gtr','Gtr Harmonics',
+'Acoustic Bass','Finger Bass','Pick Bass','Fretless Bass','Slap Bass 1','Slap Bass 2','Synth Bass 1','Synth Bass 2',
+'Violin','Viola','Cello','Contrabass','Tremolo Str','Pizzicato Str','Harp','Timpani',
+'String Ens 1','String Ens 2','Synth Str 1','Synth Str 2','Choir Aahs','Voice Oohs','Synth Voice','Orchestra Hit',
+'Trumpet','Trombone','Tuba','Muted Trumpet','French Horn','Brass Section','Synth Brass 1','Synth Brass 2',
+'Soprano Sax','Alto Sax','Tenor Sax','Baritone Sax','Oboe','English Horn','Bassoon','Clarinet',
+'Piccolo','Flute','Recorder','Pan Flute','Blown Bottle','Shakuhachi','Whistle','Ocarina',
+'Square Lead','Saw Lead','Calliope','Chiff','Charang','Voice Lead','Fifths','Bass+Lead',
+'New Age Pad','Warm Pad','Polysynth','Choir Pad','Bowed Pad','Metallic Pad','Halo Pad','Sweep Pad',
+'Rain FX','Soundtrack','Crystal','Atmosphere','Brightness','Goblins','Echoes','Sci-Fi',
+'Sitar','Banjo','Shamisen','Koto','Kalimba','Bagpipe','Fiddle','Shanai',
+'Tinkle Bell','Agogo','Steel Drums','Woodblock','Taiko','Melodic Tom','Synth Drum','Reverse Cymbal',
+'Gtr Fret Noise','Breath Noise','Seashore','Bird Tweet','Telephone','Helicopter','Applause','Gunshot'];
+
+const ROLES=['drums','bass','melody','pads','lead','ignore'];
+const ROLE_DOT={drums:'#ff5544',bass:'#7a5dff',melody:'#ffc34d',pads:'#3fbfae',lead:'#fff3d0',ignore:'#4a5468'};
+
+function trackStats(notes){
+  if(!notes.length) return {avgPitch:0,avgDur:0,density:0,poly:0,span:0,distinct:0};
+  let pSum=0,dSum=0,maxEnd=0,minT=Infinity;
+  const pitchSet=new Set();
+  for(const n of notes){ pSum+=n.midi; dSum+=n.duration; pitchSet.add(n.midi);
+    maxEnd=Math.max(maxEnd,n.time+n.duration); minT=Math.min(minT,n.time); }
+  const span=Math.max(.001,maxEnd-minT);
+  /* crude max polyphony: sweep starts vs ends */
+  let poly=0,cur=0;
+  const evs=[];
+  for(const n of notes){ evs.push([n.time,1],[n.time+n.duration,-1]); }
+  evs.sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
+  for(const e of evs){ cur+=e[1]; poly=Math.max(poly,cur); }
+  /* density floored to a 1s span so 1-note / zero-duration tracks don't explode it */
+  return { avgPitch:pSum/notes.length, avgDur:dSum/notes.length,
+           density:notes.length/Math.max(span,1), poly, span, distinct:pitchSet.size };
+}
+
+function classifyTrack(t,stats,headerName=''){
+  if(!t.notes.length) return 'ignore';
+  const ch = t.channel;
+  const perc = !!(t.instrument&&t.instrument.percussion);
+  if(ch===9||perc) return 'drums';                       /* hard GM rule */
+  let name=(t.name||'').replace(/[^\x20-\x7E]/g,' ').toLowerCase().trim();
+  /* format-0 splits leak the SONG TITLE into the first pseudo-track's name —
+     never score a name that is just the file's header name */
+  if(headerName && name===headerName) name='';
+  const prog=(t.instrument&&typeof t.instrument.number==='number')?t.instrument.number:-1;
+  const s={drums:0,bass:0,melody:0,pads:0,lead:0};
+  /* name heuristics */
+  if(/drum|perc|kit\b|kick|snare|hihat|hi-hat|\bhats?\b|cymbal|\btoms?\b|clap|\brim\b|shaker|conga|bongo|\bride\b|crash|909/.test(name)) s.drums+=60;
+  if(/808|\bbeat\b/.test(name)) s.drums+=25;            /* ambiguous: 808s are usually sub-bass */
+  if(/bass|\bsub\b|\blow\b/.test(name))                        s.bass+=60;
+  if(/lead|solo|whistle|theme/.test(name))                     s.lead+=55;
+  if(/pad|string|choir|atmo|ambien|texture|wash|drone|chord/.test(name)) s.pads+=55;
+  if(/\bmel|melody|piano|key|arp|pluck|guitar|bell|vox|voice|flute|sax|horn|organ|synth(?!.*(bass|pad))/.test(name)) s.melody+=42;
+  /* GM program heuristics — program 0 is indistinguishable from "no program
+     change at all" (the parser defaults to 0), so it is only weak evidence */
+  if(prog===0)           s.melody+=8;
+  if(prog>=1&&prog<=15)  s.melody+=26;
+  if(prog>=32&&prog<=39) s.bass+=50;
+  if(prog>=80&&prog<=87) s.lead+=48;
+  if(prog>=88&&prog<=95) s.pads+=48;
+  if(prog>=48&&prog<=55) s.pads+=32;
+  if(prog>=16&&prog<=23) s.pads+=16;
+  if(prog>=24&&prog<=31) s.melody+=24;
+  if(prog>=56&&prog<=79) s.melody+=22;
+  if(prog>=104&&prog<=111) s.melody+=18;
+  /* statistical heuristics — the only signal merged files reliably have */
+  const many = t.notes.length>=8;
+  if(stats.avgPitch<46) s.bass+=30; else if(stats.avgPitch<52) s.bass+=14;
+  if(stats.poly<=1&&stats.avgPitch<55) s.bass+=8;
+  if(many&&stats.avgPitch<48&&stats.poly<=2&&stats.density>3) s.bass+=20;  /* driving bassline */
+  if(stats.avgDur>1.2) s.pads+=24;
+  if(stats.avgDur>2.2) s.pads+=14;
+  if(stats.poly>=3&&stats.avgDur>.8) s.pads+=14;
+  if(stats.density<1.2&&stats.avgDur>1.0) s.pads+=10;
+  if(many&&stats.density>4&&stats.avgPitch>=45) s.melody+=18;   /* pitch-gated: dense subs aren't melody */
+  if(many&&stats.density>10&&stats.avgPitch>=45) s.melody+=12;
+  if(stats.avgPitch>=55&&stats.avgPitch<=86&&stats.avgDur<.8) s.melody+=10;
+  if(stats.avgPitch>74&&stats.poly<=1) s.lead+=14;
+  if(stats.avgPitch>72&&stats.poly<=1&&stats.density>1&&stats.density<8&&stats.avgDur<1) s.lead+=30;
+  if(many&&stats.avgDur<.15&&stats.distinct<=6) s.drums+=20;    /* few pitches, all staccato */
+  let best='melody',bv=-1;
+  for(const k in s) if(s[k]>bv){bv=s[k];best=k;}
+  return bv<10 ? (stats.avgPitch<46?'bass':'melody') : best;
+}
+
+/* ---------- role note lists + pointers ---------- */
+function rebuildRoleNotes(){
+  for(const r in state.roleNotes) state.roleNotes[r].length=0;
+  for(const ti of state.tracks){
+    if(ti.role==='ignore') continue;
+    for(const n of ti.track.notes) state.roleNotes[ti.role].push(n);
+  }
+  for(const r in state.roleNotes) state.roleNotes[r].sort((a,b)=>a.time-b.time);
+  syncPointers(state.time);
+}
+function syncPointers(t){
+  for(const r in state.roleNotes){
+    const arr=state.roleNotes[r];
+    let lo=0,hi=arr.length;
+    while(lo<hi){ const m=(lo+hi)>>1; (arr[m].time<t)?lo=m+1:hi=m; }
+    state.rolePtr[r]=lo;
+  }
+}
+
+/* ---------- track panel ---------- */
+function buildTrackPanel(){
+  const body=$('track-body');
+  body.innerHTML='';
+  if(!state.tracks.length){ body.innerHTML='<div class="empty">No tracks with notes found.</div>'; return; }
+  for(const ti of state.tracks){
+    const row=document.createElement('div'); row.className='trk';
+    const dot=document.createElement('span'); dot.className='dot';
+    dot.style.background=ROLE_DOT[ti.role];
+    dot.style.boxShadow=`0 0 8px ${ROLE_DOT[ti.role]}`;
+    const meta=document.createElement('div'); meta.className='meta';
+    const nm=document.createElement('div'); nm.className='nm';
+    nm.textContent=ti.name||`Track ${ti.idx+1}`;
+    const sub=document.createElement('div'); sub.className='sub';
+    const progTxt = ti.channel===9?'Drum Kit':(ti.program>=0?GM_NAMES[ti.program]:'no program');
+    sub.textContent=`ch${ti.channel+1} · ${progTxt} · ${ti.track.notes.length} notes`;
+    meta.append(nm,sub);
+    const sel=document.createElement('select');
+    for(const r of ROLES){
+      const o=document.createElement('option');
+      o.value=r; o.textContent=r;
+      if(r===ti.role)o.selected=true;
+      sel.append(o);
+    }
+    sel.addEventListener('change',()=>{
+      ti.role=sel.value;
+      dot.style.background=ROLE_DOT[ti.role];
+      dot.style.boxShadow=`0 0 8px ${ROLE_DOT[ti.role]}`;
+      rebuildRoleNotes();            /* takes effect live, mid-playback */
+      toast(`Track ${ti.idx+1} → ${ti.role}`);
+    });
+    row.append(dot,meta,sel);
+    body.append(row);
+  }
+}
+
+/* ---------- loading ---------- */
+async function loadMidiBuffer(buf,name){
+  let midi;
+  try{ midi=new Midi(buf); }
+  catch(err){ toast(`Could not parse ${name}`); console.error(err); return; }
+  resetAllVisuals();
+  state.midi=midi;
+  state.fileName=name;
+  state.duration=Number.isFinite(midi.duration)?midi.duration:0;
+  state.time=0; state.playing=false;
+  const headerName=((midi.header&&midi.header.name)||'').replace(/[^\x20-\x7E]/g,' ').toLowerCase().trim();
+  state.tracks=midi.tracks
+    .map((t,idx)=>({ t, idx }))
+    .filter(o=>o.t.notes.length>0)
+    .map(o=>{
+      const stats=trackStats(o.t.notes);
+      return {
+        idx:o.idx, track:o.t, stats,
+        name:(o.t.name||'').replace(/[^\x20-\x7E]/g,' ').trim(),
+        channel:o.t.channel??0,
+        program:(o.t.instrument&&typeof o.t.instrument.number==='number')?o.t.instrument.number:-1,
+        role:classifyTrack(o.t,stats,headerName),
+      };
+    });
+  if(!state.tracks.length){ toast(`${name}: no playable tracks found`); }
+  rebuildRoleNotes();
+  buildTrackPanel();
+  const total=state.tracks.reduce((s,ti)=>s+ti.track.notes.length,0);
+  $('file-label').textContent=`${name} · ${total} notes`;
+  $('hint-card').classList.add('gone');
+  $('transport').classList.add('on');
+  updateTransportUI();
+  toast(`Loaded ${name} — ${state.tracks.length} tracks, ${total} notes`);
+  startPlayback();
+}
+async function loadMidiFile(file){
+  if(!/\.midi?$/i.test(file.name)){ toast('Not a .mid file'); return; }
+  loadMidiBuffer(await file.arrayBuffer(), file.name);
+}
+/* programmatic hook (also used by automated tests) */
+window.__loadMidiBuffer = loadMidiBuffer;
+
+function resetAllVisuals(){
+  for(const k in entities) entities[k].reset();
+  state.energy=0; state.shake=0;
+}
+
+/* ---------- drag & drop + picker ---------- */
+let dragDepth=0;
+addEventListener('dragenter',e=>{ e.preventDefault(); dragDepth++; $('drop-overlay').classList.add('show'); });
+addEventListener('dragover', e=>{ e.preventDefault(); });
+addEventListener('dragleave',e=>{ e.preventDefault(); if(--dragDepth<=0){dragDepth=0;$('drop-overlay').classList.remove('show');} });
+addEventListener('drop',e=>{
+  e.preventDefault(); dragDepth=0;
+  $('drop-overlay').classList.remove('show');
+  const f=e.dataTransfer.files&&e.dataTransfer.files[0];
+  if(f) loadMidiFile(f);
+});
+$('btn-open').addEventListener('click',()=>$('file-input').click());
+$('file-input').addEventListener('change',e=>{ if(e.target.files[0]) loadMidiFile(e.target.files[0]); e.target.value=''; });
+
+let toastTimer=0;
+function toast(msg){
+  const el=$('toast');
+  el.textContent=msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>el.classList.remove('show'),2600);
+}
+
+/* ============================================================
+   AUDIO — lightweight Tone.js preview synths, mutable
+   (the user often mutes these and plays the real recording)
+============================================================ */
+const audio=(()=>{
+  let ready=false, muted=false;
+  const master=new Tone.Volume(-10).toDestination();
+  const kick=new Tone.MembraneSynth({octaves:6,pitchDecay:.04}).connect(master);
+  const snare=new Tone.NoiseSynth({noise:{type:'white'},envelope:{attack:.001,decay:.18,sustain:0}}).connect(master);
+  snare.volume.value=-8;
+  const hat=new Tone.MetalSynth({envelope:{attack:.001,decay:.08,release:.01},
+    harmonicity:5.1,modulationIndex:24,resonance:5500,octaves:1.2}).connect(master);
+  hat.volume.value=-20;
+  const bassS=new Tone.MonoSynth({oscillator:{type:'sawtooth'},
+    filter:{type:'lowpass',Q:2},
+    filterEnvelope:{attack:.02,decay:.25,sustain:.4,release:.4,baseFrequency:90,octaves:2.5},
+    envelope:{attack:.01,decay:.2,sustain:.7,release:.3}}).connect(master);
+  bassS.volume.value=-4;
+  const melodyS=new Tone.PolySynth(Tone.Synth,{oscillator:{type:'triangle'},
+    envelope:{attack:.01,decay:.15,sustain:.45,release:.35}}).connect(master);
+  melodyS.maxPolyphony=12;
+  const padsS=new Tone.PolySynth(Tone.Synth,{oscillator:{type:'sine'},
+    envelope:{attack:.5,decay:.4,sustain:.8,release:1.4}}).connect(master);
+  padsS.maxPolyphony=10; padsS.volume.value=-9;
+  const leadS=new Tone.Synth({oscillator:{type:'square'},
+    envelope:{attack:.02,decay:.2,sustain:.55,release:.3}}).connect(master);
+  leadS.volume.value=-9;
+  return {
+    async ensure(){ if(!ready){ try{ await Tone.start(); ready=true; }catch(e){} } },
+    trigger(role,n){
+      if(muted||!ready) return;
+      const t=Tone.now(), dur=Math.max(.05,Math.min(n.duration||.2,6)), vel=n.velocity;
+      try{
+        if(role==='drums'){
+          const ty=drumType(n.midi);
+          if(ty==='kick')       kick.triggerAttackRelease('C1',.18,t,vel);
+          else if(ty==='snare') snare.triggerAttackRelease(.15,t,vel*.8);
+          else if(ty==='hat')   hat.triggerAttackRelease('G5',.06,t,vel*.5);
+          else if(ty==='crash') hat.triggerAttackRelease('C6',.7,t,vel*.4);
+          else                  kick.triggerAttackRelease('G1',.12,t,vel*.6);
+        }else{
+          const f=Tone.Frequency(n.midi,'midi').toFrequency();
+          if(role==='bass')        bassS.triggerAttackRelease(f,dur,t,vel);
+          else if(role==='melody') melodyS.triggerAttackRelease(f,dur,t,vel*.8);
+          else if(role==='pads')   padsS.triggerAttackRelease(f,Math.min(dur,4),t,vel*.5);
+          else if(role==='lead')   leadS.triggerAttackRelease(f,dur,t,vel*.7);
+        }
+      }catch(err){ /* overlapping mono triggers can throw — never break visuals */ }
+    },
+    setMuted(m){ muted=m; master.mute=m; },
+    get muted(){ return muted; }
+  };
+})();
+
+/* ============================================================
+   TRANSPORT — manual clock (robust scrubbing), note dispatch
+============================================================ */
+const ICON_PLAY='&#9654;', ICON_PAUSE='&#10074;&#10074;';
+let scrubbing=false;
+
+function startPlayback(){
+  if(!state.midi) return;
+  audio.ensure();
+  if(state.time>=state.duration) seekTo(0);
+  state.playing=true;
+  $('btn-play').innerHTML=ICON_PAUSE;
+}
+function pausePlayback(){ state.playing=false; $('btn-play').innerHTML=ICON_PLAY; }
+function togglePlay(){ state.playing?pausePlayback():startPlayback(); }
+function seekTo(t){
+  state.time=clamp(t,0,state.duration||0);
+  syncPointers(state.time);
+  resetAllVisuals();
+  updateTransportUI(true);
+}
+let lastShownSec=-1, lastScrubV=-1;
+function updateTransportUI(force=false){
+  const sec=Math.floor(state.time);
+  if(force||sec!==lastShownSec){
+    lastShownSec=sec;
+    $('time-label').textContent=`${fmtT(state.time)} / ${fmtT(state.duration)}`;
+  }
+  const sv=state.duration?Math.round(state.time/state.duration*1000):0;
+  if(!scrubbing&&(force||sv!==lastScrubV)){ lastScrubV=sv; $('scrub').value=sv; }
+}
+function dispatchNotes(){
+  for(const r in state.roleNotes){
+    const arr=state.roleNotes[r];
+    let p=state.rolePtr[r];
+    while(p<arr.length&&arr[p].time<=state.time){ fireNote(r,arr[p]); p++; }
+    state.rolePtr[r]=p;
+  }
+}
+
+$('btn-play').addEventListener('click',togglePlay);
+$('btn-rew').addEventListener('click',()=>seekTo(0));
+$('scrub').addEventListener('pointerdown',()=>scrubbing=true);
+addEventListener('pointerup',()=>scrubbing=false);
+addEventListener('pointercancel',()=>scrubbing=false);
+$('scrub').addEventListener('input',e=>{ if(state.midi) seekTo(e.target.value/1000*state.duration); });
+$('btn-mute').addEventListener('click',toggleMute);
+function toggleMute(){
+  audio.setMuted(!audio.muted);
+  $('btn-mute').innerHTML=audio.muted?'&#128263;':'&#128266;';
+  $('btn-mute').classList.toggle('lit',audio.muted);
+  try{ localStorage.setItem('synv3.muted',audio.muted?'1':'0'); }catch(e){}
+}
+addEventListener('keydown',e=>{
+  const tag=e.target.tagName;
+  if(tag==='SELECT'||(tag==='INPUT'&&e.target.type!=='range')) return;
+  if(e.code==='Space'){ e.preventDefault(); togglePlay(); }
+  else if(e.key==='m'||e.key==='M') toggleMute();
+  else if(e.key==='o'||e.key==='O') $('file-input').click();
+});
+
+/* ============================================================
+   TUNING PANEL — the design lab
+============================================================ */
+const SLIDER_DEFS=[
+  {sect:'POST'},
+  {key:'bloomStrength', label:'Bloom Strength', min:0,  max:2,   step:.01, apply:v=>bloom.strength=v},
+  {key:'bloomThreshold',label:'Bloom Threshold',min:0,  max:1.2, step:.01, apply:v=>bloom.threshold=v},
+  {key:'exposure',      label:'Exposure',       min:.3, max:2,   step:.01, apply:v=>renderer.toneMappingExposure=v},
+  {key:'fogDensity',    label:'Fog Density',    min:0,  max:.05, step:.001,apply:v=>U.fog.value=v},
+  {sect:'MOTION'},
+  {key:'particleDensity', label:'Particle Density',min:.2,max:2.5,step:.05},
+  {key:'trailPersistence',label:'Trail Persist',   min:.3,max:2.5,step:.05},
+  {key:'driftSpeed',      label:'Camera Drift',    min:0, max:2.5,step:.05},
+  {sect:'INSTRUMENT LEVELS'},
+  {key:'intDrums', label:'Drums',  min:0,max:2,step:.05},
+  {key:'intBass',  label:'Bass',   min:0,max:2,step:.05},
+  {key:'intMelody',label:'Melody', min:0,max:2,step:.05},
+  {key:'intPads',  label:'Pads',   min:0,max:2,step:.05},
+  {key:'intLead',  label:'Lead',   min:0,max:2,step:.05},
+];
+const sliderEls={};
+function buildTuning(){
+  const host=$('sliders');
+  for(const d of SLIDER_DEFS){
+    if(d.sect){ const s=document.createElement('div'); s.className='sect'; s.textContent=d.sect; host.append(s); continue; }
+    const row=document.createElement('div'); row.className='row';
+    const lab=document.createElement('label'); lab.textContent=d.label;
+    const inp=document.createElement('input');
+    inp.type='range'; inp.min=d.min; inp.max=d.max; inp.step=d.step; inp.value=params[d.key];
+    const val=document.createElement('span'); val.className='val'; val.textContent=(+params[d.key]).toFixed(2);
+    inp.addEventListener('input',()=>{
+      const v=parseFloat(inp.value);
+      params[d.key]=v;
+      val.textContent=v.toFixed(2);
+      if(d.apply)d.apply(v);
+    });
+    sliderEls[d.key]={inp,val};
+    row.append(lab,inp,val);
+    host.append(row);
+  }
+  const sel=$('preset-select');
+  for(const name in PRESETS){
+    const o=document.createElement('option');
+    o.value=name; o.textContent=name;
+    sel.append(o);
+  }
+  sel.addEventListener('change',()=>applyPreset(sel.value));
+}
+function refreshSliderUI(){
+  for(const k in sliderEls){
+    sliderEls[k].inp.value=params[k];
+    sliderEls[k].val.textContent=(+params[k]).toFixed(2);
+  }
+}
+function applyPreset(name){
+  const P=PRESETS[name]; if(!P) return;
+  Object.assign(params,P.params);
+  Object.assign(look,P.look);
+  loadPalette(P.pal);
+  scene.background.set(P.bg);
+  bloom.strength=params.bloomStrength;
+  bloom.threshold=params.bloomThreshold;
+  bloom.radius=params.bloomRadius;
+  renderer.toneMappingExposure=params.exposure;
+  U.fog.value=params.fogDensity;
+  grade.uniforms.uVignette.value=look.vignette;
+  grade.uniforms.uGrain.value=look.grain;
+  grade.uniforms.uSaturation.value=look.saturation;
+  grade.uniforms.uTint.value.set(look.tint[0],look.tint[1],look.tint[2]);
+  bass.mats.massMat.uniforms.uScale.value=look.bassNoiseScale;
+  bass.mats.massMat.uniforms.uSpeed.value=look.bassNoiseSpeed;
+  for(const m of pads.mats){ m.uniforms.uSpeed.value=look.padSpeed; m.uniforms.uAlpha.value=look.padAlpha; }
+  stars.mat.uniforms.uBrightness.value=look.starBrightness;
+  melody.headsMat.uniforms.uSizeMul.value=look.cometSize;
+  refreshSliderUI();
+  const sel=$('preset-select');
+  if(sel.value!==name) sel.value=name;
+  toast(name+' — '+P.desc);
+}
+
+/* panel folding */
+for(const id of ['track','tune']){
+  $(id+'-head').addEventListener('click',()=>{
+    const body=$(id==='track'?'track-body':'tune-body');
+    body.classList.toggle('folded');
+    $(id+'-head').querySelector('.fold').textContent=body.classList.contains('folded')?'+':'–';
+  });
+}
+
+/* ============================================================
+   MAIN LOOP
+============================================================ */
+let lastWall=performance.now()/1000, fpsAcc=0, fpsN=0, fpsT=0;
+function animate(){
+  requestAnimationFrame(animate);
+  frame(performance.now()/1000);
+}
+function frame(wall){
+  const dt=Math.min(Math.max(wall-lastWall,0),.1);   /* clamp: hidden-tab resume must not avalanche notes */
+  lastWall=wall;
+  U.time.value=wall;
+  grade.uniforms.uTime.value=wall;
+  INT.drums.value=params.intDrums; INT.bass.value=params.intBass;
+  INT.melody.value=params.intMelody; INT.pads.value=params.intPads; INT.lead.value=params.intLead;
+
+  if(state.playing){
+    state.time+=dt;
+    if(state.time>=state.duration){ state.time=state.duration; pausePlayback(); }
+    dispatchNotes();
+    updateTransportUI();
+  }
+
+  /* anti-whiteout governor: busy passages compress everything smoothly,
+     and bloom itself tightens under load instead of stacking to white */
+  state.energy*=Math.exp(-1.7*dt);
+  U.gain.value=clamp(1/(1+state.energy*.16),.45,1);
+  bloom.strength=params.bloomStrength*(.62+.38*U.gain.value);
+
+  updateCamera(wall,dt);
+  for(const k in entities) entities[k].update(dt,wall);
+  composer.render();
+
+  fpsAcc+=dt; fpsN++;
+  if((fpsT+=dt)>=.5){
+    state.fps=Math.round(fpsN/fpsAcc);
+    $('fps-label').textContent=state.fps+' fps';
+    fpsAcc=0; fpsN=0; fpsT=0;
+  }
+}
+
+/* ============================================================
+   BOOT
+============================================================ */
+buildTuning();
+applyPreset('Deep Space Installation');
+$('preset-select').value='Deep Space Installation';
+try{ if(localStorage.getItem('synv3.muted')==='1'){ audio.setMuted(true);
+  $('btn-mute').innerHTML='&#128263;'; $('btn-mute').classList.add('lit'); } }catch(e){}
+/* unlock the AudioContext on the first user gesture anywhere */
+addEventListener('pointerdown',()=>audio.ensure(),{once:true});
+window.__viz={state,params,look,bloom,grade,renderer,composer,applyPreset,seekTo,togglePlay,
+  /* drive frames manually (testing / hidden-tab capture) */
+  step:(dt=1/60)=>frame(lastWall+dt)};
+animate();
+</script>
+</body>
+</html>
