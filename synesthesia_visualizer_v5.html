@@ -1,0 +1,1842 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Synesthesia Visualizer v5 — Club Hall</title>
+<style>
+  :root{
+    --accent:#8fb7ff;
+    --panel-bg:rgba(7,11,20,.66);
+    --panel-border:rgba(150,180,255,.10);
+    --txt:#c6d4ee;
+    --txt-dim:#5f6f8f;
+    --mono:'JetBrains Mono','SF Mono',Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:100%;height:100%;overflow:hidden;background:#000}
+  body{font:13px/1.45 Inter,ui-sans-serif,system-ui,'Segoe UI',Roboto,sans-serif;color:var(--txt);
+       -webkit-font-smoothing:antialiased;user-select:none}
+  canvas{display:block}
+
+  /* ---------- drop overlay ---------- */
+  #drop-overlay{position:fixed;inset:0;z-index:40;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(ellipse at center,rgba(70,120,255,.14),rgba(0,0,10,.55));
+    backdrop-filter:blur(7px);opacity:0;pointer-events:none;transition:opacity .18s ease}
+  #drop-overlay.show{opacity:1}
+  .drop-ring{width:320px;height:320px;border:1.5px dashed rgba(150,190,255,.75);border-radius:50%;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+    box-shadow:0 0 60px rgba(110,160,255,.25),inset 0 0 60px rgba(110,160,255,.12);
+    transform:scale(.96);transition:transform .18s ease}
+  #drop-overlay.show .drop-ring{transform:scale(1)}
+  .drop-label{font-size:19px;letter-spacing:.45em;text-indent:.45em;color:#dce8ff;font-weight:600}
+  .drop-sub{font-size:11px;letter-spacing:.2em;color:var(--txt-dim)}
+
+  /* ---------- hint card ---------- */
+  #hint-card{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:30;text-align:center;
+    padding:36px 50px;border-radius:16px;background:var(--panel-bg);backdrop-filter:blur(16px);
+    border:1px solid var(--panel-border);box-shadow:0 18px 70px rgba(0,0,0,.55);
+    transition:opacity .6s ease,transform .6s ease}
+  #hint-card.gone{opacity:0;transform:translate(-50%,-54%);pointer-events:none}
+  #hint-card h1{font-size:21px;font-weight:600;letter-spacing:.42em;text-indent:.42em;color:#e8f0ff}
+  #hint-card h1 span{color:var(--accent);font-weight:300}
+  #hint-card p{margin:14px 0 20px;color:var(--txt-dim);font-size:12.5px;letter-spacing:.04em}
+  #hint-card button{cursor:pointer;padding:9px 24px;border-radius:8px;border:1px solid rgba(150,190,255,.35);
+    background:rgba(110,160,255,.12);color:#dbe7ff;font:600 12px Inter,sans-serif;letter-spacing:.14em;
+    transition:background .15s;margin:0 5px}
+  #hint-card button:hover{background:rgba(110,160,255,.25)}
+
+  /* ---------- panels ---------- */
+  .panel{position:fixed;z-index:20;width:272px;border-radius:12px;background:var(--panel-bg);
+    backdrop-filter:blur(16px);border:1px solid var(--panel-border);
+    box-shadow:0 10px 44px rgba(0,0,0,.45);overflow:hidden}
+  #track-panel{left:16px;top:16px}
+  #lyric-panel{left:16px;bottom:84px}
+  #tune-panel{right:16px;top:16px;width:288px}
+  .panel header{display:flex;align-items:center;gap:8px;padding:10px 12px;cursor:pointer;
+    border-bottom:1px solid rgba(150,180,255,.07)}
+  .panel header .ttl{font-size:10.5px;font-weight:700;letter-spacing:.3em;color:#9fb4da}
+  .panel header .file-label{flex:1;text-align:right;font-size:10px;color:var(--txt-dim);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .panel header .fold{margin-left:auto;background:none;border:none;color:var(--txt-dim);cursor:pointer;
+    font:600 13px var(--mono);padding:0 2px}
+  .panel .body{padding:10px 12px;max-height:56vh;overflow-y:auto}
+  .panel .body.folded{display:none}
+  .panel .body::-webkit-scrollbar{width:6px}
+  .panel .body::-webkit-scrollbar-thumb{background:rgba(150,180,255,.18);border-radius:3px}
+  .empty{color:var(--txt-dim);font-size:11.5px;padding:6px 0}
+
+  /* track rows */
+  .trk{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid rgba(150,180,255,.05)}
+  .trk:last-child{border-bottom:none}
+  .trk .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .trk .meta{flex:1;min-width:0}
+  .trk .nm{font-size:11.5px;color:#d7e2f7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .trk .sub{font-size:9.5px;color:var(--txt-dim);font-family:var(--mono)}
+  .trk select{flex:none;width:84px;background:rgba(20,28,48,.9);color:var(--txt);border:1px solid rgba(150,180,255,.18);
+    border-radius:6px;font:11px Inter,sans-serif;padding:3px 4px;cursor:pointer}
+
+  /* lyric panel */
+  #lyric-text{width:100%;height:84px;resize:none;background:rgba(10,14,26,.85);color:#d9c8f5;
+    border:1px solid rgba(170,130,255,.22);border-radius:7px;font:10.5px var(--mono);padding:6px;
+    user-select:text}
+  #lyric-apply{margin-top:7px;width:100%;cursor:pointer;padding:7px;border-radius:7px;
+    border:1px solid rgba(190,130,255,.35);background:rgba(150,90,255,.13);color:#e6d6ff;
+    font:600 11px Inter,sans-serif;letter-spacing:.12em}
+  #lyric-apply:hover{background:rgba(150,90,255,.26)}
+  #lyric-status{margin-top:6px;font:10px var(--mono);color:var(--txt-dim)}
+
+  /* tuning rows */
+  .row{display:flex;align-items:center;gap:8px;margin:7px 0}
+  .row label{flex:none;width:112px;font-size:10.5px;color:#9fb0cf;letter-spacing:.03em}
+  .row .val{flex:none;width:38px;text-align:right;font:10px var(--mono);color:var(--txt-dim)}
+  .row input[type=range]{flex:1;-webkit-appearance:none;height:3px;border-radius:2px;
+    background:rgba(150,180,255,.18);outline:none}
+  .row input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;border-radius:50%;
+    background:var(--accent);border:none;cursor:pointer;box-shadow:0 0 8px rgba(140,180,255,.5)}
+  .sect{margin:13px 0 4px;font-size:9.5px;font-weight:700;letter-spacing:.26em;color:#6d7fa3}
+
+  /* ---------- transport ---------- */
+  #transport{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:20;
+    display:flex;align-items:center;gap:10px;padding:10px 16px;border-radius:14px;
+    background:var(--panel-bg);backdrop-filter:blur(16px);border:1px solid var(--panel-border);
+    box-shadow:0 10px 44px rgba(0,0,0,.45);min-width:700px;opacity:.35;pointer-events:none;
+    transition:opacity .4s}
+  #transport.on{opacity:1;pointer-events:auto}
+  #transport button{background:none;border:none;color:#d7e2f7;cursor:pointer;font-size:15px;
+    width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;
+    transition:background .12s;flex:none}
+  #transport button:hover{background:rgba(150,180,255,.12)}
+  #transport button.lit{color:var(--accent)}
+  #transport button.txt{width:auto;padding:0 9px;font:600 10px Inter,sans-serif;letter-spacing:.1em}
+  #time-label{font:11px var(--mono);color:var(--txt-dim);white-space:nowrap;min-width:88px;text-align:center}
+  #scrub{flex:1;-webkit-appearance:none;height:4px;border-radius:2px;background:rgba(150,180,255,.18);outline:none;min-width:180px}
+  #scrub::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;
+    background:#dbe7ff;cursor:pointer;box-shadow:0 0 10px rgba(160,200,255,.6)}
+  #fps-label{font:10px var(--mono);color:var(--txt-dim);width:42px;text-align:right}
+  .off-group{display:flex;align-items:center;gap:3px;flex:none}
+  .off-group .lbl{font:9px var(--mono);color:var(--txt-dim);letter-spacing:.08em;margin-right:2px}
+  .off-group button{width:20px!important;height:20px!important;font-size:11px!important}
+  #off-input{width:52px;background:rgba(20,28,48,.9);color:var(--txt);border:1px solid rgba(150,180,255,.18);
+    border-radius:5px;font:10px var(--mono);padding:3px 4px;text-align:center}
+
+  /* ---------- debug hud ---------- */
+  #hud{position:fixed;right:16px;bottom:84px;z-index:20;width:300px;max-height:280px;overflow:hidden;
+    padding:9px 11px;border-radius:10px;background:rgba(5,8,16,.78);border:1px solid var(--panel-border);
+    font:10px/1.55 var(--mono);color:#9fb0cf;display:none;pointer-events:none}
+  #hud.show{display:block}
+  #hud .h-ttl{font-size:9px;letter-spacing:.25em;color:#6d7fa3;margin-bottom:5px}
+
+  /* ---------- toast ---------- */
+  #toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%) translateY(8px);z-index:50;
+    padding:8px 18px;border-radius:9px;background:rgba(12,18,32,.92);border:1px solid var(--panel-border);
+    color:#cfe0ff;font-size:12px;opacity:0;pointer-events:none;transition:all .25s ease}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.1/examples/jsm/"
+  }
+}
+</script>
+<script src="https://cdn.jsdelivr.net/npm/tone@14.8.49/build/Tone.js"></script>
+</head>
+<body>
+
+<div id="drop-overlay"><div class="drop-ring"><div class="drop-label">DROP FILES</div><div class="drop-sub">.mid · .mp3/.wav · .lrc</div></div></div>
+
+<div id="hint-card">
+  <h1>SYNESTHESIA <span>v5</span></h1>
+  <p>One room. Four instruments. Drop a MIDI file (plus an MP3/WAV and .lrc if you have them),<br>or judge the room with the built-in pattern.</p>
+  <button id="btn-open">LOAD FILES</button>
+  <button id="btn-test">TEST TONE</button>
+</div>
+<input type="file" id="file-input" accept=".mid,.midi,.mp3,.wav,.ogg,.m4a,.flac,.lrc,audio/*" multiple style="display:none">
+
+<section class="panel" id="track-panel">
+  <header id="track-head"><span class="ttl">TRACKS</span><span class="file-label" id="file-label">no file</span><button class="fold">–</button></header>
+  <div class="body" id="track-body"><div class="empty">Load a MIDI file (or hit TEST TONE) to see tracks.</div></div>
+</section>
+
+<section class="panel" id="lyric-panel">
+  <header id="lyric-head"><span class="ttl">LYRICS</span><span class="file-label" id="lyric-label">none</span><button class="fold">–</button></header>
+  <div class="body" id="lyric-body">
+    <textarea id="lyric-text" placeholder="one line per row:&#10;0:12.50 | first lyric line&#10;0:18.20 | second lyric line&#10;&#10;…or drop a .lrc file anywhere"></textarea>
+    <button id="lyric-apply">APPLY LYRICS</button>
+    <div id="lyric-status">no lyrics loaded — placeholder pulses on vocal notes</div>
+  </div>
+</section>
+
+<section class="panel" id="tune-panel">
+  <header id="tune-head"><span class="ttl">TUNING</span><button class="fold">–</button></header>
+  <div class="body" id="tune-body"><div id="sliders"></div></div>
+</section>
+
+<footer id="transport">
+  <button id="btn-rew" title="Back to start">&#9198;</button>
+  <button id="btn-play" title="Play / pause (space)">&#9654;</button>
+  <span id="time-label">0:00 / 0:00</span>
+  <input type="range" id="scrub" min="0" max="1000" value="0" step="1">
+  <span class="off-group"><span class="lbl">MIDI&nbsp;ms</span>
+    <button id="off-minus">−</button><input id="off-input" type="number" value="0" step="5" min="-1000" max="1000"><button id="off-plus">+</button>
+  </span>
+  <button id="btn-mute" title="Mute synth audio (M)">&#128266;</button>
+  <button id="btn-hud" class="txt" title="Debug HUD (D)">HUD</button>
+  <span id="fps-label"></span>
+</footer>
+
+<div id="hud"><div class="h-ttl">MIDI EVENTS</div><div id="hud-lines"></div></div>
+<div id="toast"></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { Midi } from 'https://cdn.jsdelivr.net/npm/@tonejs/midi@2.0.28/+esm';
+
+/* ============================================================
+   helpers
+============================================================ */
+const clamp = (v,a,b)=>v<a?a:(v>b?b:v);
+const lerp  = (a,b,t)=>a+(b-a)*t;
+const smooth= (cur,target,rate,dt)=>cur+(target-cur)*(1-Math.exp(-rate*dt));
+const C     = hex=>new THREE.Color(hex);
+const $     = id=>document.getElementById(id);
+const fmtT  = s=>{s=Math.max(0,s);return `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;};
+const pitch01 = (m,lo,hi)=>clamp((m-lo)/(hi-lo),0,1);
+
+/* exponential attack / release envelope (v3's best idea, kept) */
+class Env{
+  constructor(att=.012,rel=.5){this.v=0;this.target=0;this.att=att;this.rel=rel;this.hold=0;}
+  trigger(amount=1,holdSec=0){this.target=Math.max(this.target,amount);this.hold=Math.max(this.hold,holdSec);}
+  update(dt){
+    const rate=this.v<this.target?1/this.att:1/this.rel;
+    this.v=smooth(this.v,this.target,rate,dt);
+    if(this.hold>0)this.hold-=dt;
+    if(this.hold<=0)this.target=0;
+    return this.v;
+  }
+  reset(){this.v=0;this.target=0;this.hold=0;}
+}
+
+/* ============================================================
+   live parameters — every spec slider writes here
+============================================================ */
+const params = {
+  ceilIdle:.55,      /* ceiling idle brightness */
+  snareFlash:1.0,    /* snare flash intensity */
+  snareDecay:.17,    /* snare flash decay (s) */
+  ringSpeed:7.0,     /* kick ring travel m/s */
+  ringBright:1.0,    /* kick ring brightness */
+  orbSize:.8,        /* orb size range (velocity → scale span) */
+  orbTrail:1.2,      /* orb trail length multiplier */
+  lineThick:1.0,     /* wall comet thickness */
+  scrollSpeed:.20,   /* wall background scroll (screen-lengths / s) */
+  lyricSize:1.0,     /* lyric text size */
+  bloom:.55,         /* bloom strength */
+  floorRefl:.45,     /* floor reflectivity */
+  midiOffsetMs:0,    /* MIDI vs audio nudge */
+};
+
+/* ============================================================
+   global state
+============================================================ */
+const state = {
+  time:0, playing:false, duration:0,
+  energy:0,            /* running excitement → anti-whiteout governor */
+  shake:0,
+  midi:null, fileName:'', midiDur:0,
+  tracks:[],
+  roleNotes:{drums:[],bass:[],chords:[],vocals:[]},
+  rolePtr:{drums:0,bass:0,chords:0,vocals:0},
+  tMidi:0,             /* state.time - offset, computed once per frame */
+};
+
+/* ============================================================
+   GLSL — ashima 3D simplex noise (public domain) + fbm + hash
+============================================================ */
+const NOISE_GLSL = `
+vec3 mod289(vec3 x){return x-floor(x*(1.0/289.0))*289.0;}
+vec4 mod289(vec4 x){return x-floor(x*(1.0/289.0))*289.0;}
+vec4 permute(vec4 x){return mod289(((x*34.0)+1.0)*x);}
+vec4 taylorInvSqrt(vec4 r){return 1.79284291400159-0.85373472095314*r;}
+float snoise(vec3 v){
+  const vec2 Cc=vec2(1.0/6.0,1.0/3.0);
+  const vec4 D=vec4(0.0,0.5,1.0,2.0);
+  vec3 i=floor(v+dot(v,Cc.yyy));
+  vec3 x0=v-i+dot(i,Cc.xxx);
+  vec3 g=step(x0.yzx,x0.xyz);
+  vec3 l=1.0-g;
+  vec3 i1=min(g.xyz,l.zxy);
+  vec3 i2=max(g.xyz,l.zxy);
+  vec3 x1=x0-i1+Cc.xxx;
+  vec3 x2=x0-i2+Cc.yyy;
+  vec3 x3=x0-D.yyy;
+  i=mod289(i);
+  vec4 p=permute(permute(permute(i.z+vec4(0.0,i1.z,i2.z,1.0))+i.y+vec4(0.0,i1.y,i2.y,1.0))+i.x+vec4(0.0,i1.x,i2.x,1.0));
+  float n_=0.142857142857;
+  vec3 ns=n_*D.wyz-D.xzx;
+  vec4 j=p-49.0*floor(p*ns.z*ns.z);
+  vec4 x_=floor(j*ns.z);
+  vec4 y_=floor(j-7.0*x_);
+  vec4 x=x_*ns.x+ns.yyyy;
+  vec4 y=y_*ns.x+ns.yyyy;
+  vec4 h=1.0-abs(x)-abs(y);
+  vec4 b0=vec4(x.xy,y.xy);
+  vec4 b1=vec4(x.zw,y.zw);
+  vec4 s0=floor(b0)*2.0+1.0;
+  vec4 s1=floor(b1)*2.0+1.0;
+  vec4 sh=-step(h,vec4(0.0));
+  vec4 a0=b0.xzyw+s0.xzyw*sh.xxyy;
+  vec4 a1=b1.xzyw+s1.xzyw*sh.zzww;
+  vec3 p0=vec3(a0.xy,h.x);
+  vec3 p1=vec3(a0.zw,h.y);
+  vec3 p2=vec3(a1.xy,h.z);
+  vec3 p3=vec3(a1.zw,h.w);
+  vec4 norm=taylorInvSqrt(vec4(dot(p0,p0),dot(p1,p1),dot(p2,p2),dot(p3,p3)));
+  p0*=norm.x;p1*=norm.y;p2*=norm.z;p3*=norm.w;
+  vec4 m=max(0.6-vec4(dot(x0,x0),dot(x1,x1),dot(x2,x2),dot(x3,x3)),0.0);
+  m=m*m;
+  return 42.0*dot(m*m,vec4(dot(p0,x0),dot(p1,x1),dot(p2,x2),dot(p3,x3)));
+}
+float fbm(vec3 p){
+  float f=0.0,a=0.5;
+  for(int i=0;i<2;i++){f+=a*snoise(p);p*=2.07;a*=0.5;}
+  return f;
+}
+float hash21(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}`;
+
+/* ============================================================
+   shared uniforms
+============================================================ */
+const U = {
+  time:{value:0},
+  gain:{value:1},        /* anti-whiteout governor 1/(1+k·energy) */
+  ceilLum:{value:0},     /* ceiling luminance: idle + snare flash */
+};
+
+/* ============================================================
+   renderer / scene / camera — eye height near one end,
+   looking down the length of the hall
+============================================================ */
+const renderer = new THREE.WebGLRenderer({antialias:false,powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,1.5));
+renderer.setSize(innerWidth,innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = C('#020203');
+
+const camera = new THREE.PerspectiveCamera(52, innerWidth/innerHeight, .1, 120);
+camera.position.set(0,1.65,8.6);
+
+/* room dimensions (metres) — intimate hall, not a tunnel */
+const ROOM = { w:14.6, len:21.0, h:7.2, wallX:7.25, backZ:-10.5, frontZ:10.5 };
+
+/* ---------- camera: subtle idle sway + click-drag look-around ---------- */
+let yaw=0,pitch=0,yawT=0,pitchT=0,dragging=false;
+renderer.domElement.addEventListener('pointerdown',e=>{ if(e.button===0){dragging=true;} });
+addEventListener('pointermove',e=>{
+  if(!dragging) return;
+  yawT  = clamp(yawT - e.movementX*.0030, -2.4, 2.4);
+  pitchT= clamp(pitchT- e.movementY*.0026, -.65, .55);
+});
+addEventListener('pointerup',()=>dragging=false);
+const _camTgt=new THREE.Vector3();
+function updateCamera(wall,dt){
+  state.shake=Math.max(0,state.shake-dt*4);
+  yaw  = smooth(yaw,yawT,9,dt);
+  pitch= smooth(pitch,pitchT,9,dt);
+  const swayYaw = Math.sin(wall*.055)*.011;
+  camera.position.set(
+    Math.sin(wall*.07)*.10,
+    1.65+Math.sin(wall*.121)*.035,
+    8.6+Math.cos(wall*.049)*.13 - state.shake*.10);
+  const cy=yaw+swayYaw;
+  _camTgt.set(
+    camera.position.x - Math.sin(cy)*10*Math.cos(pitch),
+    camera.position.y + Math.sin(pitch+.03)*10,
+    camera.position.z - Math.cos(cy)*10*Math.cos(pitch));
+  camera.lookAt(_camTgt);
+}
+
+/* ============================================================
+   post chain (kept from v3): render → bloom → ACES/sRGB → grade
+============================================================ */
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene,camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight), params.bloom, .6, .86);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+const GradeShader = {
+  uniforms:{
+    tDiffuse:{value:null}, uTime:{value:0},
+    uVignette:{value:.34}, uGrain:{value:.035},
+    uSaturation:{value:1.05}, uTint:{value:new THREE.Vector3(1.0,.99,1.03)},
+  },
+  vertexShader:`varying vec2 vUv;
+    void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+  fragmentShader:`
+    uniform sampler2D tDiffuse;
+    uniform float uTime,uVignette,uGrain,uSaturation;
+    uniform vec3 uTint;
+    varying vec2 vUv;
+    float hash(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
+    void main(){
+      vec3 col = texture2D(tDiffuse,vUv).rgb;
+      col *= uTint;
+      float l = dot(col,vec3(0.2126,0.7152,0.0722));
+      col = max(vec3(0.0), mix(vec3(l),col,uSaturation));
+      vec2 q = vUv-0.5;
+      col *= clamp(1.0-uVignette*dot(q,q)*2.6, 0.0, 1.0);
+      col += (hash(vUv*vec2(917.3,531.7)+fract(uTime*61.0)*vec2(173.1,289.7))-0.5)*uGrain;
+      gl_FragColor = vec4(clamp(col,0.0,1.0),1.0);
+    }`
+};
+const grade = new ShaderPass(GradeShader);
+composer.addPass(grade);
+
+addEventListener('resize',()=>{
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+  composer.setSize(innerWidth,innerHeight);
+  reflRT.setSize(Math.floor(innerWidth/2),Math.floor(innerHeight/2));
+});
+
+/* ============================================================
+   room lighting — hemisphere follows the ceiling, point follows orb
+============================================================ */
+const hemi = new THREE.HemisphereLight(0xfff0dc, 0x06070a, .6);
+scene.add(hemi);
+const orbLight = new THREE.PointLight(0x40d8ff, 0, 20, 2);
+scene.add(orbLight);
+
+/* ============================================================
+   ROOM SHELL — walls, columns, back-wall stage (static)
+============================================================ */
+const shell = new THREE.Group();
+scene.add(shell);
+{
+  const wallMat   = new THREE.MeshStandardMaterial({color:0x14161d,roughness:.55,metalness:.2});
+  const colMat    = new THREE.MeshStandardMaterial({color:0x0e1016,roughness:.3,metalness:.65});
+  const stageMat  = new THREE.MeshStandardMaterial({color:0x171a24,roughness:.5,metalness:.3});
+  const trimMat   = new THREE.MeshBasicMaterial({color:0xcf8a3a});
+
+  const mkWall=(w,h,x,y,z,ry)=>{
+    const m=new THREE.Mesh(new THREE.PlaneGeometry(w,h),wallMat);
+    m.position.set(x,y,z); m.rotation.y=ry; shell.add(m); return m;
+  };
+  mkWall(ROOM.len,ROOM.h,-ROOM.wallX,ROOM.h/2,0, Math.PI/2);    /* left  */
+  mkWall(ROOM.len,ROOM.h, ROOM.wallX,ROOM.h/2,0,-Math.PI/2);    /* right */
+  mkWall(ROOM.w,ROOM.h, 0,ROOM.h/2,ROOM.backZ, 0);              /* back  */
+  mkWall(ROOM.w,ROOM.h, 0,ROOM.h/2,ROOM.frontZ, Math.PI);       /* front (behind viewer) */
+
+  /* structural columns along both side walls */
+  const colGeo=new THREE.BoxGeometry(.55,ROOM.h,.5);
+  for(let z=-9; z<=9; z+=3){
+    for(const sx of [-1,1]){
+      const c=new THREE.Mesh(colGeo,colMat);
+      c.position.set(sx*6.95, ROOM.h/2, z);
+      shell.add(c);
+    }
+  }
+
+  /* back-wall stage: low platform + booth + warm static glints */
+  const platform=new THREE.Mesh(new THREE.BoxGeometry(10,.9,2.6),stageMat);
+  platform.position.set(0,.45,-9.2); shell.add(platform);
+  const booth=new THREE.Mesh(new THREE.BoxGeometry(3.2,1.15,1.0),colMat);
+  booth.position.set(0,1.47,-9.2); shell.add(booth);
+  for(let i=0;i<6;i++){
+    const led=new THREE.Mesh(new THREE.BoxGeometry(.46,.05,.02),trimMat);
+    led.position.set(-1.58+i*.63, 1.22+(i%2)*.26, -8.69); shell.add(led);
+  }
+  for(const sx of [-1,1]){
+    const strip=new THREE.Mesh(new THREE.BoxGeometry(.06,2.2,.06),trimMat);
+    strip.position.set(sx*5.3,1.55,-10.35); shell.add(strip);
+  }
+  /* warm trim along the stage front lip */
+  const lip=new THREE.Mesh(new THREE.BoxGeometry(7.0,.04,.04),trimMat);
+  lip.position.set(0,.91,-7.88); shell.add(lip);
+}
+
+/* ============================================================
+   CEILING — grid of frosted light panels. Idles warm-white,
+   FLASHES on every snare (instant attack, slider decay,
+   per-panel non-uniformity from a static hash).
+============================================================ */
+const ceiling = (()=>{
+  const env = new Env(.004, params.snareDecay);
+  const mat = new THREE.ShaderMaterial({
+    uniforms:{ uIdle:{value:params.ceilIdle}, uFlash:{value:0}, uGain:U.gain },
+    vertexShader:`varying vec2 vUv;
+      void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+    fragmentShader:`
+      uniform float uIdle,uFlash,uGain;
+      varying vec2 vUv;
+      float hash(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
+      void main(){
+        vec2 g=vUv*vec2(8.0,12.0);
+        vec2 cell=floor(g), f=fract(g);
+        float h=hash(cell), h2=hash(cell+11.7);
+        vec2 bm=smoothstep(0.018,0.060,f)*smoothstep(0.018,0.060,1.0-f);
+        float mask=bm.x*bm.y;
+        float soft=1.0-0.30*length(f-0.5)*1.4142;        /* frosted falloff inside each panel */
+        float fl=pow(max(uFlash,0.0),1.0+h*0.9);          /* per-panel decay non-uniformity */
+        float lum=uIdle*(0.72+0.42*h2)+fl*(0.80+0.40*h);
+        float centerBoost=0.88+0.24*smoothstep(1.0,0.25,abs(vUv.x-0.5)*2.0);
+        /* dark cove where ceiling meets the walls — kills the sawtooth */
+        float cove=smoothstep(0.0,0.055,vUv.x)*smoothstep(1.0,0.945,vUv.x)
+                  *smoothstep(0.0,0.030,vUv.y)*smoothstep(1.0,0.970,vUv.y);
+        /* warm cream at idle, shifting slightly cool on the snare flash */
+        vec3 tint=mix(vec3(1.0,0.93,0.82), vec3(0.94,0.97,1.0), clamp(fl*0.55,0.0,0.5));
+        vec3 col=tint*lum*mask*soft*centerBoost*cove*1.25;
+        col=min(col,vec3(2.4));                           /* crisp panels, not bloom fog */
+        col+=vec3(0.018,0.016,0.014)*(uIdle+fl);          /* faint frame */
+        gl_FragColor=vec4(col*uGain,1.0);
+      }`
+  });
+  const geo=new THREE.PlaneGeometry(ROOM.w,ROOM.len);
+  geo.rotateX(Math.PI/2);                                 /* face down */
+  const mesh=new THREE.Mesh(geo,mat);
+  mesh.position.y=ROOM.h;
+  scene.add(mesh);
+  return {
+    env, mat,
+    flash(vel){ env.trigger(clamp(vel,0,1)*params.snareFlash, 0); },
+    update(dt){
+      env.rel=params.snareDecay;
+      const e=env.update(dt);
+      mat.uniforms.uIdle.value=params.ceilIdle;
+      mat.uniforms.uFlash.value=e;
+      U.ceilLum.value = params.ceilIdle*.55 + e*.9;
+      hemi.intensity = .32 + U.ceilLum.value*2.0;
+    },
+    reset(){ env.reset(); mat.uniforms.uFlash.value=0; }
+  };
+})();
+
+/* ============================================================
+   FLOOR — glossy dark planar reflection. Every glowing element
+   smears here: real mirrored render, blurred taps, fresnel.
+============================================================ */
+const reflRT = new THREE.WebGLRenderTarget(
+  Math.floor(innerWidth/2), Math.floor(innerHeight/2),
+  { type:THREE.HalfFloatType });
+const virtualCam = new THREE.PerspectiveCamera();
+const texMat = new THREE.Matrix4();
+
+const floorMesh = (()=>{
+  const mat = new THREE.ShaderMaterial({
+    uniforms:{
+      tReflect:{value:reflRT.texture}, uTexMat:{value:texMat},
+      uRefl:{value:params.floorRefl}, uCeilLum:U.ceilLum, uGain:U.gain, uTime:U.time,
+      uCamPos:{value:camera.position},
+      uOrbPos:{value:new THREE.Vector3(0,2,0)}, uOrbCol:{value:C('#37d4ff')}, uOrbI:{value:0},
+    },
+    vertexShader:`
+      uniform mat4 uTexMat;
+      varying vec4 vMirror; varying vec3 vWorld;
+      void main(){
+        vec4 wp=modelMatrix*vec4(position,1.0);
+        vWorld=wp.xyz;
+        vMirror=uTexMat*vec4(position,1.0);
+        gl_Position=projectionMatrix*viewMatrix*wp;
+      }`,
+    fragmentShader:NOISE_GLSL+`
+      uniform sampler2D tReflect;
+      uniform float uRefl,uCeilLum,uGain,uTime,uOrbI;
+      uniform vec3 uCamPos,uOrbPos,uOrbCol;
+      varying vec4 vMirror; varying vec3 vWorld;
+      void main(){
+        /* dark mottled concrete with faint 2m tile seams */
+        float n=snoise(vec3(vWorld.xz*0.33,2.7))*0.5+0.5;
+        vec3 albedo=vec3(0.013,0.015,0.020)*(0.65+0.7*n);
+        vec2 tile=abs(fract(vWorld.xz/2.0)-0.5);
+        albedo*=0.88+0.12*smoothstep(0.012,0.05,min(tile.x,tile.y));
+        /* ceiling wash + orb point light (manual: floor is custom) */
+        vec3 col=albedo*(0.30+1.25*uCeilLum);
+        vec3 L=uOrbPos-vWorld;
+        float d2=dot(L,L);
+        float ndl=clamp(L.y*inversesqrt(max(d2,0.001)),0.0,1.0);
+        col+=albedo*uOrbCol*uOrbI*ndl/(1.0+d2*0.45)*16.0;
+        /* mirrored scene, 4 vertically smeared taps */
+        vec2 muv=vMirror.xy/max(vMirror.w,0.0001);
+        float j=(hash21(vWorld.xz*7.3)-0.5)*0.0035;
+        vec3 refl =texture2D(tReflect,muv+vec2(0.0,j)).rgb;
+        refl+=texture2D(tReflect,muv+vec2( 0.0018,0.007+j)).rgb;
+        refl+=texture2D(tReflect,muv+vec2(-0.0018,0.014+j)).rgb;
+        refl+=texture2D(tReflect,muv+vec2( 0.0,   0.022+j)).rgb;
+        refl*=0.25;
+        /* compress blown-white reflections (ceiling) while colored glows pass through */
+        refl/=1.0+dot(refl,vec3(0.2126,0.7152,0.0722))*0.35;
+        vec3 V=normalize(uCamPos-vWorld);
+        float fres=mix(0.40,1.0,pow(1.0-clamp(V.y,0.0,1.0),3.0));
+        col+=refl*uRefl*fres;
+        gl_FragColor=vec4(col,1.0);
+      }`
+  });
+  const geo=new THREE.PlaneGeometry(ROOM.w,ROOM.len);
+  geo.rotateX(-Math.PI/2);
+  const mesh=new THREE.Mesh(geo,mat);
+  scene.add(mesh);
+  return mesh;
+})();
+
+/* mirror update — Reflector math for plane y=0, then render scene
+   from below into reflRT (floor + floor-rings hidden) */
+const _rPos=new THREE.Vector3(), _cPos=new THREE.Vector3(), _rotM=new THREE.Matrix4(),
+      _norm=new THREE.Vector3(), _view=new THREE.Vector3(), _look=new THREE.Vector3(), _tgt=new THREE.Vector3();
+function updateReflection(){
+  if(params.floorRefl<0.01) return;            /* reflection invisible — skip the mirror pass */
+  _rPos.setFromMatrixPosition(floorMesh.matrixWorld);
+  _cPos.setFromMatrixPosition(camera.matrixWorld);
+  _norm.set(0,1,0);
+  _view.subVectors(_rPos,_cPos);
+  if(_view.dot(_norm)>0) return;
+  _view.reflect(_norm).negate().add(_rPos);
+  _rotM.extractRotation(camera.matrixWorld);
+  _look.set(0,0,-1).applyMatrix4(_rotM).add(_cPos);
+  _tgt.subVectors(_rPos,_look).reflect(_norm).negate().add(_rPos);
+  virtualCam.position.copy(_view);
+  virtualCam.up.set(0,1,0).applyMatrix4(_rotM).reflect(_norm);
+  virtualCam.lookAt(_tgt);
+  virtualCam.near=camera.near; virtualCam.far=camera.far;
+  virtualCam.updateMatrixWorld();
+  virtualCam.projectionMatrix.copy(camera.projectionMatrix);
+  texMat.set(.5,0,0,.5, 0,.5,0,.5, 0,0,.5,.5, 0,0,0,1);
+  texMat.multiply(virtualCam.projectionMatrix);
+  texMat.multiply(virtualCam.matrixWorldInverse);
+  texMat.multiply(floorMesh.matrixWorld);
+  floorMesh.visible=false; ringGroup.visible=false;
+  renderer.setRenderTarget(reflRT);
+  renderer.render(scene,virtualCam);
+  renderer.setRenderTarget(null);
+  floorMesh.visible=true; ringGroup.visible=true;
+}
+
+/* ============================================================
+   ParticlePool — CPU point sprites, zero alloc after build
+   (v3 class, fog stripped)
+============================================================ */
+class ParticlePool{
+  constructor(cap){
+    this.cap=cap; this.head=0;
+    this.vel  = new Float32Array(cap*3);
+    this.life = new Float32Array(cap);
+    this.maxL = new Float32Array(cap);
+    this.drag = new Float32Array(cap);
+    this.grav = new Float32Array(cap);
+    const pos = new Float32Array(cap*3);
+    const col = new Float32Array(cap*3);
+    const sz  = new Float32Array(cap);
+    const t   = new Float32Array(cap);
+    const g = this.geo = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos,3).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute('aColor',   new THREE.BufferAttribute(col,3).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute('aSize',    new THREE.BufferAttribute(sz,1).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute('aT',       new THREE.BufferAttribute(t,1).setUsage(THREE.DynamicDrawUsage));
+    this.live=0;
+    this.mat = new THREE.ShaderMaterial({
+      uniforms:{ uPixelRatio:{value:renderer.getPixelRatio()}, uGain:U.gain },
+      vertexShader:`
+        attribute vec3 aColor; attribute float aSize,aT;
+        uniform float uPixelRatio;
+        varying vec3 vCol; varying float vT;
+        void main(){
+          vec4 mv = modelViewMatrix*vec4(position,1.0);
+          vCol=aColor; vT=aT;
+          gl_PointSize = aSize*(0.55+0.45*aT)*uPixelRatio*(160.0/max(1.0,-mv.z))*step(0.001,aT);
+          gl_Position = projectionMatrix*mv;
+        }`,
+      fragmentShader:`
+        uniform float uGain;
+        varying vec3 vCol; varying float vT;
+        void main(){
+          if(vT<=0.001) discard;
+          float d = length(gl_PointCoord-0.5);
+          float a = smoothstep(0.5,0.04,d);
+          gl_FragColor = vec4(vCol*uGain*a*vT*vT, 1.0);
+        }`,
+      transparent:true, depthWrite:false, depthTest:true, blending:THREE.AdditiveBlending
+    });
+    this.points = new THREE.Points(g,this.mat);
+    this.points.frustumCulled = false;
+    scene.add(this.points);
+  }
+  spawn(x,y,z, vx,vy,vz, life,size, color,bright, drag=0,grav=0){
+    const i=this.head; this.head=(this.head+1)%this.cap;
+    if(this.life[i]<=0) this.live++;
+    const p=this.geo.attributes.position.array, c=this.geo.attributes.aColor.array;
+    p[i*3]=x; p[i*3+1]=y; p[i*3+2]=z;
+    this.vel[i*3]=vx; this.vel[i*3+1]=vy; this.vel[i*3+2]=vz;
+    c[i*3]=color.r*bright; c[i*3+1]=color.g*bright; c[i*3+2]=color.b*bright;
+    this.geo.attributes.aSize.array[i]=size;
+    this.life[i]=this.maxL[i]=life;
+    this.drag[i]=drag; this.grav[i]=grav;
+    this.geo.attributes.aSize.needsUpdate=true;
+    this.geo.attributes.aColor.needsUpdate=true;
+  }
+  update(dt){
+    if(this.live===0) return;
+    const p=this.geo.attributes.position.array, t=this.geo.attributes.aT.array, v=this.vel;
+    for(let i=0;i<this.cap;i++){
+      if(this.life[i]<=0){ t[i]=0; continue; }
+      this.life[i]-=dt;
+      if(this.life[i]<=0){ t[i]=0; this.live--; continue; }
+      const dr=1-this.drag[i]*dt;
+      v[i*3]*=dr; v[i*3+1]=v[i*3+1]*dr-this.grav[i]*dt; v[i*3+2]*=dr;
+      p[i*3]+=v[i*3]*dt; p[i*3+1]+=v[i*3+1]*dt; p[i*3+2]+=v[i*3+2]*dt;
+      t[i]=this.life[i]/this.maxL[i];
+    }
+    this.geo.attributes.position.needsUpdate=true;
+    this.geo.attributes.aT.needsUpdate=true;
+  }
+  reset(){ this.live=0; this.life.fill(0); this.geo.attributes.aT.array.fill(0); this.geo.attributes.aT.needsUpdate=true; }
+}
+
+/* ============================================================
+   KICK → FLOOR RINGS — magenta, radiating from floor centre,
+   velocity → brightness, light bleeds across the gloss
+============================================================ */
+const ringGroup = new THREE.Group();
+scene.add(ringGroup);
+const rings = (()=>{
+  const N=12, RMAX=8.4, items=[];
+  const geo=new THREE.PlaneGeometry(2,2);
+  geo.rotateX(-Math.PI/2);
+  for(let i=0;i<N;i++){
+    const mat=new THREE.ShaderMaterial({
+      uniforms:{ uR:{value:0}, uBright:{value:1}, uHot:{value:0}, uScale:{value:1}, uGain:U.gain },
+      vertexShader:`
+        varying vec2 vP;
+        void main(){
+          vP=position.xz;
+          gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);
+        }`,
+      fragmentShader:`
+        uniform float uR,uBright,uHot,uScale,uGain;
+        varying vec2 vP;
+        void main(){
+          float r=length(vP)*uScale;          /* quad is scaled to the ring front */
+          float d=abs(r-uR);
+          float ring=exp(-d*55.0)*1.15+exp(-d*14.0)*0.40+exp(-d*3.2)*0.07;  /* thick core + soft + bleed */
+          float fade=pow(max(0.0,1.0-uR),1.25);
+          float mask=smoothstep(1.0,0.965,r);
+          vec3 magenta=mix(vec3(1.0,0.07,0.50),vec3(1.0,0.45,0.80),uHot);
+          float a=ring*fade*uBright*mask;
+          if(a<0.004) discard;
+          gl_FragColor=vec4(magenta*a*2.0*uGain,1.0);
+        }`,
+      transparent:true, depthWrite:false, blending:THREE.AdditiveBlending
+    });
+    const mesh=new THREE.Mesh(geo,mat);
+    mesh.scale.setScalar(RMAX);
+    mesh.position.set(0,.02+i*.0016,0);
+    mesh.visible=false; mesh.frustumCulled=false;
+    ringGroup.add(mesh);
+    items.push({mesh,mat,active:false,r:0,bright:1});
+  }
+  let head=0;
+  return {
+    fire(vel){
+      const w=items[head]; head=(head+1)%N;
+      w.active=true; w.r=0;
+      w.bright=(.35+.85*vel)*params.ringBright;
+      w.mat.uniforms.uHot.value=clamp((vel-.88)*4.0,0,1);
+      w.mesh.visible=true;
+    },
+    update(dt){
+      for(const w of items){
+        if(!w.active){ w.mesh.visible=false; continue; }
+        w.r+=params.ringSpeed*dt/RMAX;
+        if(w.r>=1){ w.active=false; w.mesh.visible=false; continue; }
+        /* quad grows with the ring front — young rings don't pay full-floor fill */
+        const s=clamp(w.r+0.4,0.15,1);
+        w.mesh.scale.setScalar(RMAX*s);
+        w.mat.uniforms.uScale.value=s;
+        w.mat.uniforms.uR.value=w.r;
+        w.mat.uniforms.uBright.value=w.bright;
+      }
+    },
+    reset(){ for(const w of items){ w.active=false; w.mesh.visible=false; } }
+  };
+})();
+
+/* ============================================================
+   HI-HATS → AIR SPARKS — brief white particles near ceiling edges
+============================================================ */
+const sparks = new ParticlePool(1200);
+const SPARK_WHITE = C('#f4f8ff');
+function fireSparks(vel,count){
+  for(let i=0;i<count;i++){
+    const sx=(Math.random()<.5?-1:1)*(4.4+Math.random()*2.1);
+    sparks.spawn(
+      sx, 5.9+Math.random()*1.0, -8+Math.random()*15,
+      (Math.random()-.5)*.8, -.2-Math.random()*.7, (Math.random()-.5)*.8,
+      .22+Math.random()*.30, 1.1+Math.random()*1.2,
+      SPARK_WHITE, .6+.85*vel, 1.2, -0.4);
+  }
+}
+
+/* ============================================================
+   BASS → THE ORB — levitating plasma sphere at room centre.
+   pitch → height, velocity → smooth size, trail, real light.
+============================================================ */
+const orb = (()=>{
+  const env = new Env(.03,.65);
+  const baseR=.62;
+  let yCur=2.0, yTarget=2.0, scaleCur=1, amp=0;
+
+  const mat = new THREE.ShaderMaterial({
+    uniforms:{ uTime:U.time, uGain:U.gain, uAmp:{value:0} },
+    vertexShader:NOISE_GLSL+`
+      uniform float uTime,uAmp;
+      varying vec3 vN,vV,vP;
+      void main(){
+        vec3 dir=normalize(position);
+        vec3 p=position*(1.0+0.045*snoise(dir*2.5+vec3(0.0,uTime*0.6,0.0))*(0.5+uAmp));
+        vec4 mv=modelViewMatrix*vec4(p,1.0);
+        vN=normalize(normalMatrix*normal);
+        vV=normalize(-mv.xyz);
+        vP=dir;
+        gl_Position=projectionMatrix*mv;
+      }`,
+    fragmentShader:NOISE_GLSL+`
+      uniform float uTime,uAmp,uGain;
+      varying vec3 vN,vV,vP;
+      void main(){
+        float facing=clamp(dot(normalize(vN),normalize(vV)),0.0,1.0);
+        float n1=fbm(vP*2.3+vec3(0.0,uTime*0.45,0.0));
+        float n2=snoise(vP*4.6-vec3(uTime*0.7,0.0,uTime*0.3));
+        float fil=pow(max(0.0,1.0-abs(n2)),7.0);                 /* electric filaments */
+        vec3 deep=vec3(0.012,0.10,0.22), cyan=vec3(0.10,0.85,1.0), white=vec3(0.80,0.97,1.0);
+        vec3 col=deep*(0.5+0.5*n1)*(0.9+1.0*uAmp);
+        col+=cyan*fil*(0.8+2.4*uAmp);
+        col+=white*pow(facing,3.0)*(0.13+0.55*uAmp)*(0.6+0.4*n1); /* hot core, kept cyan-leaning */
+        col+=cyan*pow(1.0-facing,2.2)*(0.45+1.0*uAmp);            /* rim */
+        gl_FragColor=vec4(col*uGain,1.0);
+      }`
+  });
+  const mesh=new THREE.Mesh(new THREE.IcosahedronGeometry(baseR,4),mat);
+  mesh.position.set(0,2,0);
+  scene.add(mesh);
+
+  /* soft volumetric halo billboard */
+  const haloMat=new THREE.ShaderMaterial({
+    uniforms:{ uAmp:{value:0}, uGain:U.gain },
+    vertexShader:`varying vec2 vP;
+      void main(){vP=position.xy;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+    fragmentShader:`
+      uniform float uAmp,uGain;
+      varying vec2 vP;
+      void main(){
+        float d=length(vP);
+        float a=exp(-d*4.4)*(0.06+0.32*uAmp);
+        if(a<0.004) discard;
+        gl_FragColor=vec4(vec3(0.13,0.75,1.0)*a*uGain,1.0);
+      }`,
+    transparent:true, depthWrite:false, blending:THREE.AdditiveBlending
+  });
+  const halo=new THREE.Mesh(new THREE.PlaneGeometry(2,2),haloMat);
+  halo.frustumCulled=false;
+  scene.add(halo);
+
+  const trail=new ParticlePool(2200);
+  const TRAIL_C=C('#49ddff'), TRAIL_HOT=C('#c9f4ff');
+  const tmpC=new THREE.Color();
+  let emitAcc=0, lastY=2;
+
+  return {
+    mesh,
+    onNote(n){
+      env.trigger(.4+.6*n.velocity, Math.min(n.duration||.3, 4));
+      yTarget = .8 + pitch01(n.midi,28,62)*2.7;
+    },
+    update(dt,wall){
+      const e=env.update(dt);
+      amp = Math.max(e, .085+.028*Math.sin(wall*1.7));          /* idle ember */
+      mat.uniforms.uAmp.value=amp;
+      haloMat.uniforms.uAmp.value=amp;
+      yCur = smooth(yCur,yTarget,5,dt);
+      const vy=(yCur-lastY)/Math.max(dt,1e-4); lastY=yCur;
+      const sTarget = 1 + e*.55*params.orbSize;
+      scaleCur = smooth(scaleCur,sTarget,8,dt);
+      mesh.position.y=yCur;
+      mesh.scale.setScalar(scaleCur);
+      mesh.rotation.y+=dt*.18;
+      halo.position.copy(mesh.position);
+      halo.scale.setScalar(baseR*scaleCur*7);
+      halo.quaternion.copy(camera.quaternion);
+      orbLight.position.set(0,yCur,0);
+      orbLight.intensity = 6*(0.12+amp*1.15);
+      floorMesh.material.uniforms.uOrbPos.value.set(0,yCur,0);
+      floorMesh.material.uniforms.uOrbI.value = .16+amp*1.3;
+      /* fading motion trail — denser when moving between pitches */
+      emitAcc += dt*(7+Math.abs(vy)*85)*(amp>.1?1:.35);
+      while(emitAcc>=1){
+        emitAcc-=1;
+        tmpC.copy(TRAIL_C).lerp(TRAIL_HOT,Math.random()*.5);
+        trail.spawn(
+          (Math.random()-.5)*.5*scaleCur, yCur+(Math.random()-.5)*.5*scaleCur, (Math.random()-.5)*.5*scaleCur,
+          (Math.random()-.5)*.4, -vy*.18+(Math.random()-.5)*.3, (Math.random()-.5)*.4,
+          (.30+Math.random()*.35)*params.orbTrail, .9+Math.random()*1.2,
+          tmpC, .25+.55*amp, 1.4, .2);
+      }
+      trail.update(dt);
+    },
+    reset(){ env.reset(); trail.reset(); yTarget=2; },
+  };
+})();
+
+/* ============================================================
+   CHORDS → WALL SCREENS — both side walls, mirrored content.
+   One golden comet per sounding note. Heads anchored at the FAR
+   end; tails are the head's literal past, fed through a history
+   ring that scrolls toward the viewer (treadmill). A scrolling
+   starfield supplies the sense of forward flight.
+============================================================ */
+const walls = (()=>{
+  const HIST_W=128, NLINES=6, HEAD_U=0.92;
+  const histArr=new Float32Array(HIST_W*NLINES*4);
+  const histTex=new THREE.DataTexture(histArr,HIST_W,NLINES,THREE.RGBAFormat,THREE.FloatType);
+  histTex.minFilter=histTex.magFilter=THREE.NearestFilter;
+  histTex.needsUpdate=true;
+
+  const lines=Array.from({length:NLINES},()=>({
+    active:false, midi:-1, y:.5, yT:.5, env:new Env(.025,.75), envVal:0, end:0, w:1, tailLife:0
+  }));
+  let scrollAcc=0, flowPhase=0;
+  /* per-line head state (y, env, width, live) — shared by both wall materials,
+     fresh every frame (no texel lag), and lets dark lines skip all fetches */
+  const headState=Array.from({length:NLINES},()=>new THREE.Vector4(.5,0,1,0));
+
+  const mkMat=flip=>new THREE.ShaderMaterial({
+    uniforms:{ tHist:{value:histTex}, uTime:U.time, uGain:U.gain,
+      uFlow:{value:0}, uThick:{value:params.lineThick},
+      uFlip:{value:flip}, uHeadU:{value:HEAD_U}, uHeads:{value:headState} },
+    vertexShader:`varying vec2 vUv;
+      void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+    fragmentShader:`
+      uniform sampler2D tHist;
+      uniform float uTime,uGain,uFlow,uThick,uFlip,uHeadU;
+      uniform vec4 uHeads[6];
+      varying vec2 vUv;
+      float hash(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
+      void main(){
+        float u=mix(vUv.x,1.0-vUv.x,uFlip);          /* u=1 → far end (back of room) */
+        vec3 col=vec3(0.004,0.005,0.009);            /* LED panel, near-black */
+        /* --- treadmill background: starfield streaking toward the viewer --- */
+        float flow=uFlow;                            /* CPU-accumulated: slider changes never jump phase */
+        for(int L=0;L<2;L++){
+          float sc=(L==0)?1.0:2.3;
+          vec2 sp=vec2((u+flow)*9.0*sc, vUv.y*3.0*sc);
+          vec2 cell=floor(sp), f=fract(sp);
+          float h=hash(cell);
+          vec2 d=f-vec2(0.5+0.3*(hash(cell+7.3)-0.5), 0.5+0.6*(hash(cell+3.1)-0.5));
+          float star=exp(-dot(d*vec2(2.2,16.0),d*vec2(2.2,16.0)))*step(0.80,h);
+          col+=vec3(0.35,0.45,0.62)*star*(0.085+0.14*h)*((L==0)?1.0:0.55);
+        }
+        col*=0.70+0.55*sin(3.14159*vUv.y);           /* soft vertical falloff */
+        /* --- golden comet lines from the history texture --- */
+        vec3 gold=vec3(1.0,0.80,0.22), hot=vec3(1.0,0.93,0.58);
+        float aspect=13.5/3.4;
+        for(int i=0;i<6;i++){
+          vec4 hd=uHeads[i];
+          if(hd.w<0.5) continue;                     /* head AND tail fully dark: skip fetches */
+          float vrow=(float(i)+0.5)/6.0;
+          float x=clamp(u,0.0,1.0)*127.0;
+          float x0=floor(x), fx=x-x0;
+          vec4 h0=texture2D(tHist,vec2((x0+0.5)/128.0,vrow));
+          vec4 h1=texture2D(tHist,vec2((min(x0+1.0,127.0)+0.5)/128.0,vrow));
+          vec4 hh=mix(h0,h1,fx);
+          float behind=uHeadU-u;
+          float mask=1.0-smoothstep(0.0,0.018,-behind);      /* nothing ahead of the head */
+          if(mask<=0.0) continue;
+          /* gentle ripple travelling with the background */
+          float rip=sin(u*34.0+flow*34.0+float(i)*1.9)*0.011*clamp(behind*6.0,0.0,1.0);
+          float dy=abs(vUv.y-(hh.x+rip));
+          float w=max(hh.z*uThick,0.18)*0.011;
+          float core=exp(-dy/w*2.0)*1.25;
+          float glow=exp(-dy/(w*5.0))*0.30;
+          float tailFade=exp(-max(behind,0.0)*3.0);
+          float shimmer=0.90+0.10*sin(uTime*6.0+float(i)*2.1+u*9.0);
+          col+=gold*hh.y*(core+glow)*tailFade*1.9*mask*shimmer;
+          /* bright head blob */
+          vec2 hp=vec2((u-uHeadU)*aspect, vUv.y-hd.x);
+          float dh=dot(hp,hp);
+          col+=mix(gold,hot,0.75)*hd.y*exp(-dh*1300.0)*3.0;
+          col+=gold*hd.y*exp(-dh*200.0)*0.5;
+        }
+        gl_FragColor=vec4(col*uGain,1.0);
+      }`
+  });
+
+  const geo=new THREE.PlaneGeometry(13.5,3.4);
+  const left=new THREE.Mesh(geo,mkMat(0));
+  left.position.set(-6.6,3.4,-3.45); left.rotation.y=Math.PI/2;
+  scene.add(left);
+  const right=new THREE.Mesh(geo,mkMat(1));
+  right.position.set(6.6,3.4,-3.45); right.rotation.y=-Math.PI/2;
+  scene.add(right);
+  const mats=[left.material,right.material];
+
+  function allocSlot(midi,yT){
+    let s=lines.find(l=>l.active&&l.midi===midi);
+    if(s) return s;
+    let best=null,bd=1e9;
+    for(const l of lines) if(!l.active){ const d=Math.abs(l.yT-yT); if(d<bd){bd=d;best=l;} }
+    if(best) return best;
+    return lines.reduce((m,l)=>l.end<m.end?l:m,lines[0]);
+  }
+  const headIdx=Math.round(HEAD_U*(HIST_W-1));
+
+  return {
+    onNote(n){
+      const yT=.12+pitch01(n.midi,48,78)*.76;
+      const s=allocSlot(n.midi,yT);
+      if(s.envVal<.02){ s.y=yT; }                  /* dark line: appear in place, no ghost glide */
+      s.active=true; s.midi=n.midi; s.yT=yT;
+      s.w=.55+.9*n.velocity;
+      s.end=n.time+(n.duration||.3);
+      s.env.trigger(.45+.55*n.velocity, Math.min(n.duration||.3,8));
+    },
+    update(dt){
+      const tailWindow=HEAD_U/Math.max(params.scrollSpeed,0.02);  /* time for energy to clear the tail */
+      for(let i=0;i<NLINES;i++){
+        const s=lines[i];
+        s.y=smooth(s.y,s.yT,6,dt);                 /* heads glide, never snap */
+        s.envVal=s.env.update(dt);
+        if(s.active && state.tMidi>s.end+.05 && s.env.hold<=0) s.active=false;
+        if(s.envVal>0.004) s.tailLife=tailWindow; else s.tailLife=Math.max(0,s.tailLife-dt);
+        headState[i].set(s.y, s.envVal, s.w, (s.envVal>0.004||s.tailLife>0)?1:0);
+      }
+      flowPhase+=params.scrollSpeed*dt;
+      /* treadmill: shift history toward the viewer */
+      scrollAcc+=params.scrollSpeed*dt*HIST_W;
+      let k=Math.floor(scrollAcc); scrollAcc-=k;
+      if(k>0){
+        k=Math.min(k,HIST_W-1);
+        for(let li=0;li<NLINES;li++){
+          const base=li*HIST_W*4;
+          histArr.copyWithin(base, base+k*4, base+HIST_W*4);
+        }
+      }
+      /* write fresh head cells (cover the k cells the shift exposed) */
+      for(let li=0;li<NLINES;li++){
+        const s=lines[li], base=li*HIST_W*4;
+        for(let i=Math.max(0,headIdx-k);i<=headIdx;i++){
+          const o=base+i*4;
+          histArr[o]=s.y; histArr[o+1]=s.envVal; histArr[o+2]=s.w; histArr[o+3]=0;
+        }
+      }
+      histTex.needsUpdate=true;
+      for(const m of mats){
+        m.uniforms.uFlow.value=flowPhase;
+        m.uniforms.uThick.value=params.lineThick;
+      }
+    },
+    reset(){
+      for(let i=0;i<NLINES;i++){ const s=lines[i];
+        s.active=false; s.env.reset(); s.envVal=0; s.tailLife=0; headState[i].set(.5,0,1,0); }
+      histArr.fill(0); histTex.needsUpdate=true; scrollAcc=0;
+    },
+    lines
+  };
+})();
+
+/* ============================================================
+   VOCALS → LYRIC TEXT — violet neon line floating above the orb.
+   Lines appear / hold / crossfade on schedule. Placeholder pulses
+   on vocal-track note-ons when no lyrics are loaded.
+============================================================ */
+const lyric = (()=>{
+  const pulse=new Env(.012,.45);
+  let linesArr=[], cur=-1;
+
+  function mkLayer(){
+    const cv=document.createElement('canvas'); cv.width=1792; cv.height=320;
+    const ctx=cv.getContext('2d');
+    const tex=new THREE.CanvasTexture(cv);
+    tex.colorSpace=THREE.SRGBColorSpace;
+    const mat=new THREE.MeshBasicMaterial({map:tex,transparent:true,opacity:0,
+      blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide});
+    const mesh=new THREE.Mesh(new THREE.PlaneGeometry(7.4,1.32),mat);
+    mesh.position.set(0,4.15,0);
+    scene.add(mesh);
+    return {cv,ctx,tex,mat,mesh,alpha:0,target:0,text:''};
+  }
+  const A=mkLayer(), B=mkLayer();
+  let front=A, back=B;
+
+  function draw(layer,text){
+    const {ctx,cv}=layer;
+    ctx.clearRect(0,0,cv.width,cv.height);
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.font='700 170px "Trebuchet MS","Segoe UI",Verdana,sans-serif';
+    const tw=ctx.measureText(text).width;
+    if(tw>cv.width-120){
+      const px=Math.max(60,Math.floor(170*(cv.width-120)/tw));
+      ctx.font=`700 ${px}px "Trebuchet MS","Segoe UI",Verdana,sans-serif`;
+    }
+    const x=cv.width/2,y=cv.height/2+8;
+    ctx.shadowColor='#7a18ff'; ctx.shadowBlur=80; ctx.fillStyle='#6618d8'; ctx.fillText(text,x,y); ctx.fillText(text,x,y);
+    ctx.shadowColor='#a64dff'; ctx.shadowBlur=34; ctx.fillStyle='#b266ff'; ctx.fillText(text,x,y); ctx.fillText(text,x,y);
+    ctx.shadowColor='#d9a6ff'; ctx.shadowBlur=12; ctx.fillStyle='#f4e9ff'; ctx.fillText(text,x,y);
+    layer.tex.needsUpdate=true;
+    layer.text=text;
+  }
+  function show(text){
+    [front,back]=[back,front];
+    draw(front,text);
+    front.target=1; back.target=0;
+  }
+  draw(front,'lyrics here');                       /* boot placeholder, like the reference */
+  front.target=1;
+
+  return {
+    setLines(arr){
+      linesArr=arr.slice().sort((a,b)=>a.t-b.t);
+      cur=-1;
+      $('lyric-status').textContent=linesArr.length
+        ? `${linesArr.length} lines loaded`
+        : 'no lyrics loaded — placeholder pulses on vocal notes';
+      if(!linesArr.length){ show('lyrics here'); }
+    },
+    get count(){ return linesArr.length; },
+    onVocalNote(n){ pulse.trigger(.55+.45*n.velocity,.12); },
+    update(dt,t){
+      const p=pulse.update(dt);
+      /* schedule */
+      if(linesArr.length){
+        let idx=-1;
+        for(let i=0;i<linesArr.length;i++){ if(linesArr[i].t<=t) idx=i; else break; }
+        if(idx!==cur){
+          cur=idx;
+          if(idx>=0) show(linesArr[idx].text||' ');
+          else { front.target=0; back.target=0; }
+        }
+      }
+      const placeholderPulse = linesArr.length?1:(.55+.45*p);
+      for(const L of [front,back]){
+        L.alpha=smooth(L.alpha,L.target,7,dt);
+        L.mat.opacity=L.alpha*placeholderPulse*U.gain.value;  /* lyrics obey the governor too */
+        L.mesh.scale.setScalar(params.lyricSize);
+        L.mesh.visible=L.alpha>.01;
+      }
+    },
+    reset(){ cur=-1; pulse.reset();
+      if(!linesArr.length){ show('lyrics here'); }
+      else { front.target=0; back.target=0; }    /* clear stale line; update() re-shows the right one */
+    },
+  };
+})();
+
+/* ============================================================
+   DRUMS — kick→rings, snare→ceiling, hats→sparks
+============================================================ */
+function drumType(n){
+  if(n===35||n===36) return 'kick';
+  if(n===37||n===38||n===39||n===40) return 'snare';
+  if(n===42||n===44||n===46) return 'hat';
+  if(n===49||n===51||n===52||n===53||n===55||n===57||n===59) return 'crash';
+  if(n>=41&&n<=50) return 'tom';
+  return 'perc';
+}
+const drums = {
+  onNote(n){
+    const v=n.velocity;
+    switch(drumType(n.midi)){
+      case 'kick':  rings.fire(v); state.shake=Math.max(state.shake,.14+.2*v); break;
+      case 'snare': ceiling.flash(.5+.5*v); break;
+      case 'hat':   fireSparks(v, Math.round(5+9*v)); break;
+      case 'crash': ceiling.flash(.30*v); fireSparks(v, Math.round(16+12*v)); break;
+      case 'tom':   rings.fire(v*.45); break;
+      default:      fireSparks(v*.6, 3);
+    }
+  },
+  update(dt){ rings.update(dt); sparks.update(dt); },
+  reset(){ rings.reset(); sparks.reset(); }
+};
+
+/* entity registry + note dispatch + energy governor */
+const entities={drums,bass:orb,chords:walls,vocals:{
+  onNote(n){ lyric.onVocalNote(n); },
+  update(){}, reset(){ },
+}};
+const ROLE_ENERGY={drums:.6,bass:.4,chords:.22,vocals:.15};
+function fireNote(role,n){
+  state.energy += n.velocity*ROLE_ENERGY[role];
+  entities[role].onNote(n);
+  synths.trigger(role,n);
+  hud.log(role,n);
+}
+
+/* ============================================================
+   MIDI — load + classify (channel / GM program / name / stats)
+   into v5 roles: drums · bass · chords · vocals
+============================================================ */
+const GM_NAMES=[
+'Grand Piano','Bright Piano','Electric Grand','Honky-tonk','E.Piano 1','E.Piano 2','Harpsichord','Clavinet',
+'Celesta','Glockenspiel','Music Box','Vibraphone','Marimba','Xylophone','Tubular Bells','Dulcimer',
+'Drawbar Organ','Perc. Organ','Rock Organ','Church Organ','Reed Organ','Accordion','Harmonica','Tango Accordion',
+'Nylon Guitar','Steel Guitar','Jazz Guitar','Clean Guitar','Muted Guitar','Overdrive Gtr','Distortion Gtr','Gtr Harmonics',
+'Acoustic Bass','Finger Bass','Pick Bass','Fretless Bass','Slap Bass 1','Slap Bass 2','Synth Bass 1','Synth Bass 2',
+'Violin','Viola','Cello','Contrabass','Tremolo Str','Pizzicato Str','Harp','Timpani',
+'String Ens 1','String Ens 2','Synth Str 1','Synth Str 2','Choir Aahs','Voice Oohs','Synth Voice','Orchestra Hit',
+'Trumpet','Trombone','Tuba','Muted Trumpet','French Horn','Brass Section','Synth Brass 1','Synth Brass 2',
+'Soprano Sax','Alto Sax','Tenor Sax','Baritone Sax','Oboe','English Horn','Bassoon','Clarinet',
+'Piccolo','Flute','Recorder','Pan Flute','Blown Bottle','Shakuhachi','Whistle','Ocarina',
+'Square Lead','Saw Lead','Calliope','Chiff','Charang','Voice Lead','Fifths','Bass+Lead',
+'New Age Pad','Warm Pad','Polysynth','Choir Pad','Bowed Pad','Metallic Pad','Halo Pad','Sweep Pad',
+'Rain FX','Soundtrack','Crystal','Atmosphere','Brightness','Goblins','Echoes','Sci-Fi',
+'Sitar','Banjo','Shamisen','Koto','Kalimba','Bagpipe','Fiddle','Shanai',
+'Tinkle Bell','Agogo','Steel Drums','Woodblock','Taiko','Melodic Tom','Synth Drum','Reverse Cymbal',
+'Gtr Fret Noise','Breath Noise','Seashore','Bird Tweet','Telephone','Helicopter','Applause','Gunshot'];
+
+const ROLES=['drums','bass','chords','vocals','ignore'];
+const ROLE_DOT={drums:'#ff4d9a',bass:'#35d8ff',chords:'#ffd34d',vocals:'#c44dff',ignore:'#4a5468'};
+
+function trackStats(notes){
+  if(!notes.length) return {avgPitch:0,avgDur:0,density:0,poly:0,span:0,distinct:0};
+  let pSum=0,dSum=0,maxEnd=0,minT=Infinity;
+  const pitchSet=new Set();
+  for(const n of notes){ pSum+=n.midi; dSum+=n.duration; pitchSet.add(n.midi);
+    maxEnd=Math.max(maxEnd,n.time+n.duration); minT=Math.min(minT,n.time); }
+  const span=Math.max(.001,maxEnd-minT);
+  let poly=0,cur=0;
+  const evs=[];
+  for(const n of notes){ evs.push([n.time,1],[n.time+n.duration,-1]); }
+  evs.sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
+  for(const e of evs){ cur+=e[1]; poly=Math.max(poly,cur); }
+  return { avgPitch:pSum/notes.length, avgDur:dSum/notes.length,
+           density:notes.length/Math.max(span,1), poly, span, distinct:pitchSet.size };
+}
+
+function classifyTrack(t,stats,headerName=''){
+  if(!t.notes.length) return 'ignore';
+  const ch=t.channel;
+  const perc=!!(t.instrument&&t.instrument.percussion);
+  if(ch===9||perc) return 'drums';
+  let name=(t.name||'').replace(/[^\x20-\x7E]/g,' ').toLowerCase().trim();
+  if(headerName && name===headerName) name='';
+  const prog=(t.instrument&&typeof t.instrument.number==='number')?t.instrument.number:-1;
+  const s={drums:0,bass:0,chords:0,vocals:0};
+  if(/drum|perc|kit\b|kick|snare|hihat|hi-hat|\bhats?\b|cymbal|\btoms?\b|clap|\brim\b|shaker|conga|bongo|\bride\b|crash|909/.test(name)) s.drums+=60;
+  if(/bass|\bsub\b|808|\blow\b/.test(name)) s.bass+=60;
+  if(/voc|vox|voice|sing|lyric|choir|aah|ooh|lead voc/.test(name)) s.vocals+=60;
+  if(/pad|string|key|piano|rhodes|organ|guitar|\bgtr\b|chord|arp|pluck|synth|epiano|harmon|comp|stab/.test(name)) s.chords+=50;
+  if(/lead|melody|solo|theme/.test(name)) s.chords+=22;       /* no melody visual: harmony driver takes it */
+  if(prog===0)             s.chords+=8;
+  if(prog>=1&&prog<=31)    s.chords+=28;
+  if(prog>=32&&prog<=39)   s.bass+=52;
+  if(prog>=40&&prog<=51)   s.chords+=26;
+  if(prog>=52&&prog<=54)   s.vocals+=46;
+  if(prog>=80&&prog<=87)   s.chords+=18;
+  if(prog>=88&&prog<=95)   s.chords+=42;
+  if(prog>=104&&prog<=111) s.chords+=14;
+  if(stats.avgPitch<46) s.bass+=30; else if(stats.avgPitch<52) s.bass+=14;
+  if(stats.poly<=1&&stats.avgPitch<55) s.bass+=8;
+  if(stats.poly>=3&&stats.avgPitch>=50) s.chords+=24;   /* pitch-gated: overlapping bass tails aren't chords */
+  if(stats.avgDur>1.2&&stats.avgPitch>=48) s.chords+=14;
+  if(stats.avgPitch>72&&stats.poly<=1&&stats.avgDur>.4) s.vocals+=14;
+  let best='chords',bv=-1;
+  for(const k in s) if(s[k]>bv){bv=s[k];best=k;}
+  return bv<10 ? (stats.avgPitch<46?'bass':'chords') : best;
+}
+
+/* ---------- role note lists + pointers ---------- */
+function rebuildRoleNotes(){
+  for(const r in state.roleNotes) state.roleNotes[r].length=0;
+  for(const ti of state.tracks){
+    if(ti.role==='ignore') continue;
+    for(const n of ti.track.notes){ n._trk=ti.idx; state.roleNotes[ti.role].push(n); }
+  }
+  for(const r in state.roleNotes) state.roleNotes[r].sort((a,b)=>a.time-b.time);
+  syncPointers(midiTime());
+}
+function midiTime(){ return state.time - params.midiOffsetMs/1000; }
+function syncPointers(t){
+  for(const r in state.roleNotes){
+    const arr=state.roleNotes[r];
+    let lo=0,hi=arr.length;
+    while(lo<hi){ const m=(lo+hi)>>1; (arr[m].time<t)?lo=m+1:hi=m; }
+    state.rolePtr[r]=lo;
+  }
+}
+
+/* ---------- track panel ---------- */
+function buildTrackPanel(){
+  const body=$('track-body');
+  body.innerHTML='';
+  if(!state.tracks.length){ body.innerHTML='<div class="empty">No tracks with notes found.</div>'; return; }
+  for(const ti of state.tracks){
+    const row=document.createElement('div'); row.className='trk';
+    const dot=document.createElement('span'); dot.className='dot';
+    dot.style.background=ROLE_DOT[ti.role];
+    dot.style.boxShadow=`0 0 8px ${ROLE_DOT[ti.role]}`;
+    const meta=document.createElement('div'); meta.className='meta';
+    const nm=document.createElement('div'); nm.className='nm';
+    nm.textContent=ti.name||`Track ${ti.idx+1}`;
+    const sub=document.createElement('div'); sub.className='sub';
+    const progTxt = ti.channel===9?'Drum Kit':(ti.program>=0?GM_NAMES[ti.program]:'no program');
+    sub.textContent=`ch${ti.channel+1} · ${progTxt} · ${ti.track.notes.length} notes`;
+    meta.append(nm,sub);
+    const sel=document.createElement('select');
+    for(const r of ROLES){
+      const o=document.createElement('option');
+      o.value=r; o.textContent=r;
+      if(r===ti.role)o.selected=true;
+      sel.append(o);
+    }
+    sel.addEventListener('change',()=>{
+      ti.role=sel.value;
+      dot.style.background=ROLE_DOT[ti.role];
+      dot.style.boxShadow=`0 0 8px ${ROLE_DOT[ti.role]}`;
+      rebuildRoleNotes();
+      toast(`Track ${ti.idx+1} → ${ti.role}`);
+    });
+    row.append(dot,meta,sel);
+    body.append(row);
+  }
+}
+
+/* ---------- MIDI loading ---------- */
+async function loadMidiBuffer(buf,name){
+  let midi;
+  try{ midi=new Midi(buf); }
+  catch(err){ toast(`Could not parse ${name}`); console.error(err); return; }
+  resetAllVisuals();
+  state.midi=midi;
+  state.fileName=name;
+  state.midiDur=Number.isFinite(midi.duration)?midi.duration:0;
+  state.time=0; state.playing=false;
+  const headerName=((midi.header&&midi.header.name)||'').replace(/[^\x20-\x7E]/g,' ').toLowerCase().trim();
+  state.tracks=midi.tracks
+    .map((t,idx)=>({ t, idx }))
+    .filter(o=>o.t.notes.length>0)
+    .map(o=>{
+      const stats=trackStats(o.t.notes);
+      return {
+        idx:o.idx, track:o.t, stats,
+        name:(o.t.name||'').replace(/[^\x20-\x7E]/g,' ').trim(),
+        channel:o.t.channel??0,
+        program:(o.t.instrument&&typeof o.t.instrument.number==='number')?o.t.instrument.number:-1,
+        role:classifyTrack(o.t,stats,headerName),
+      };
+    });
+  if(!state.tracks.length){ toast(`${name}: no playable tracks found`); }
+  recomputeDuration();
+  rebuildRoleNotes();
+  buildTrackPanel();
+  const total=state.tracks.reduce((s,ti)=>s+ti.track.notes.length,0);
+  $('file-label').textContent=`${name} · ${total} notes`;
+  $('hint-card').classList.add('gone');
+  $('transport').classList.add('on');
+  updateTransportUI(true);
+  toast(`Loaded ${name} — ${state.tracks.length} tracks, ${total} notes`);
+  startPlayback();
+}
+window.__loadMidiBuffer = loadMidiBuffer;
+
+function recomputeDuration(){
+  state.duration=Math.max(state.midiDur||0, master.buffer?master.buffer.duration:0);
+}
+
+function resetAllVisuals(){
+  for(const k in entities) entities[k].reset();
+  ceiling.reset(); lyric.reset();
+  state.energy=0; state.shake=0;
+}
+
+/* ============================================================
+   LYRICS input — .lrc drop or paste box (mm:ss.xx | text)
+============================================================ */
+function parseLRC(text){
+  const out=[];
+  for(const raw of text.split(/\r?\n/)){
+    const tags=[...raw.matchAll(/\[(\d+):(\d+(?:\.\d+)?)\]/g)];
+    if(!tags.length) continue;
+    const body=raw.replace(/\[[^\]]*\]/g,'').trim();
+    if(!body) continue;
+    for(const m of tags) out.push({t:parseInt(m[1],10)*60+parseFloat(m[2]), text:body});
+  }
+  return out;
+}
+function parsePasteBox(text){
+  const out=[];
+  for(const raw of text.split(/\r?\n/)){
+    const m=raw.match(/^\s*(\d+):(\d+(?:\.\d+)?)\s*\|\s*(.+)$/);
+    if(m) out.push({t:parseInt(m[1],10)*60+parseFloat(m[2]), text:m[3].trim()});
+  }
+  return out;
+}
+function loadLyricsText(text,sourceName){
+  const arr=/\[\d+:\d/.test(text)?parseLRC(text):parsePasteBox(text);
+  if(!arr.length){ toast('No lyric lines recognised'); return; }
+  lyric.setLines(arr);
+  $('lyric-label').textContent=sourceName||'pasted';
+  toast(`${arr.length} lyric lines loaded`);
+}
+window.__loadLyricsText = loadLyricsText;
+$('lyric-apply').addEventListener('click',()=>loadLyricsText($('lyric-text').value,'pasted'));
+
+/* ============================================================
+   AUDIO MASTER CLOCK — dropped MP3/WAV drives the timeline;
+   MIDI events schedule against its playhead (+ offset nudge)
+============================================================ */
+const actx = new (window.AudioContext||window.webkitAudioContext)();
+const master = {
+  buffer:null, source:null, t0:0, name:'',
+  gainNode:(()=>{const g=actx.createGain(); g.connect(actx.destination); return g;})(),
+  startSource(at){
+    this.stopSource();
+    if(!this.buffer) return;
+    this.t0=actx.currentTime-at;
+    if(at < this.buffer.duration-.01){
+      const s=actx.createBufferSource();
+      s.buffer=this.buffer;
+      s.connect(this.gainNode);
+      s.start(0, Math.max(0,at));
+      this.source=s;
+    }
+  },
+  stopSource(){ if(this.source){ try{this.source.stop();}catch(e){} this.source.disconnect(); this.source=null; } },
+};
+/* if the context was suspended (autoplay policy) when play was hit,
+   re-sync the buffer source to the manual clock the moment it resumes */
+actx.addEventListener('statechange',()=>{
+  if(actx.state==='running'&&state.playing&&master.buffer) master.startSource(state.time);
+});
+async function loadAudioFile(file){
+  try{
+    const buf=await file.arrayBuffer();
+    const ab=await actx.decodeAudioData(buf);
+    const wasPlaying=state.playing;
+    master.stopSource();
+    master.buffer=ab; master.name=file.name;
+    recomputeDuration();
+    if(state.time>state.duration) state.time=0;
+    syncPointers(midiTime());                    /* clock moved → re-aim dispatch pointers */
+    if(wasPlaying) master.startSource(state.time);   /* keep playing, re-anchored to the new clock */
+    else { state.playing=false; $('btn-play').innerHTML=ICON_PLAY; }
+    if(!synths.muted) setMuted(true,false);      /* mute previews; not persisted as a preference */
+    $('transport').classList.add('on');
+    $('hint-card').classList.add('gone');
+    updateTransportUI(true);
+    toast(`Audio clock: ${file.name} (${fmtT(ab.duration)}) — synths muted`);
+  }catch(err){ toast(`Could not decode ${file.name}`); console.error(err); }
+}
+
+/* ============================================================
+   file drop / picker routing — midi, audio, lyrics
+============================================================ */
+function routeFile(f){
+  const ext=(f.name.match(/\.([a-z0-9]+)$/i)||[])[1]?.toLowerCase()||'';
+  if(ext==='mid'||ext==='midi') return loadMidiFile(f);
+  if(['mp3','wav','ogg','m4a','flac','aac','opus'].includes(ext)) return loadAudioFile(f);
+  if(ext==='lrc'||ext==='txt') return f.text().then(t=>loadLyricsText(t,f.name));
+  toast(`Unsupported file: ${f.name}`);
+  return Promise.resolve();
+}
+/* audio loads before MIDI so the master clock exists when MIDI autoplays */
+const FILE_PRI=f=>/\.(mp3|wav|ogg|m4a|flac|aac|opus)$/i.test(f.name)?0:(/\.midi?$/i.test(f.name)?2:1);
+async function routeFiles(list){
+  const files=[...list].sort((a,b)=>FILE_PRI(a)-FILE_PRI(b));
+  for(const f of files) await routeFile(f);
+}
+async function loadMidiFile(file){ await loadMidiBuffer(await file.arrayBuffer(), file.name); }
+
+let dragDepth=0;
+addEventListener('dragenter',e=>{ e.preventDefault(); dragDepth++; $('drop-overlay').classList.add('show'); });
+addEventListener('dragover', e=>{ e.preventDefault(); });
+addEventListener('dragleave',e=>{ e.preventDefault(); if(--dragDepth<=0){dragDepth=0;$('drop-overlay').classList.remove('show');} });
+addEventListener('drop',e=>{
+  e.preventDefault(); dragDepth=0;
+  $('drop-overlay').classList.remove('show');
+  routeFiles(e.dataTransfer.files);
+});
+$('btn-open').addEventListener('click',()=>$('file-input').click());
+$('file-input').addEventListener('change',e=>{ routeFiles(e.target.files); e.target.value=''; });
+
+let toastTimer=0;
+function toast(msg){
+  const el=$('toast');
+  el.textContent=msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>el.classList.remove('show'),2600);
+}
+
+/* ============================================================
+   SYNTHS — Tone.js preview voices (mutable; auto-muted when an
+   audio file is the clock)
+============================================================ */
+const synths=(()=>{
+  let ready=false, muted=false;
+  const masterVol=new Tone.Volume(-10).toDestination();
+  const kick=new Tone.MembraneSynth({octaves:6,pitchDecay:.04}).connect(masterVol);
+  const snare=new Tone.NoiseSynth({noise:{type:'white'},envelope:{attack:.001,decay:.18,sustain:0}}).connect(masterVol);
+  snare.volume.value=-8;
+  const hat=new Tone.MetalSynth({envelope:{attack:.001,decay:.08,release:.01},
+    harmonicity:5.1,modulationIndex:24,resonance:5500,octaves:1.2}).connect(masterVol);
+  hat.volume.value=-20;
+  const bassS=new Tone.MonoSynth({oscillator:{type:'sawtooth'},
+    filter:{type:'lowpass',Q:2},
+    filterEnvelope:{attack:.02,decay:.25,sustain:.4,release:.4,baseFrequency:90,octaves:2.5},
+    envelope:{attack:.01,decay:.2,sustain:.7,release:.3}}).connect(masterVol);
+  bassS.volume.value=-4;
+  const chordS=new Tone.PolySynth(Tone.Synth,{oscillator:{type:'triangle'},
+    envelope:{attack:.04,decay:.25,sustain:.6,release:.6}}).connect(masterVol);
+  chordS.maxPolyphony=12; chordS.volume.value=-7;
+  const voxS=new Tone.Synth({oscillator:{type:'sine'},
+    envelope:{attack:.05,decay:.2,sustain:.6,release:.4}}).connect(masterVol);
+  voxS.volume.value=-9;
+  return {
+    async ensure(){ if(!ready){ try{ await Tone.start(); ready=true; }catch(e){} } },
+    trigger(role,n){
+      if(muted||!ready) return;
+      const t=Tone.now(), dur=Math.max(.05,Math.min(n.duration||.2,6)), vel=n.velocity;
+      try{
+        if(role==='drums'){
+          const ty=drumType(n.midi);
+          if(ty==='kick')       kick.triggerAttackRelease('C1',.18,t,vel);
+          else if(ty==='snare') snare.triggerAttackRelease(.15,t,vel*.8);
+          else if(ty==='hat')   hat.triggerAttackRelease('G5',.06,t,vel*.5);
+          else if(ty==='crash') hat.triggerAttackRelease('C6',.7,t,vel*.4);
+          else                  kick.triggerAttackRelease('G1',.12,t,vel*.6);
+        }else{
+          const f=Tone.Frequency(n.midi,'midi').toFrequency();
+          if(role==='bass')        bassS.triggerAttackRelease(f,dur,t,vel);
+          else if(role==='chords') chordS.triggerAttackRelease(f,Math.min(dur,5),t,vel*.6);
+          else if(role==='vocals') voxS.triggerAttackRelease(f,dur,t,vel*.7);
+        }
+      }catch(err){ /* overlapping mono triggers can throw — never break visuals */ }
+    },
+    setMuted(m){ muted=m; masterVol.mute=m; },
+    get muted(){ return muted; }
+  };
+})();
+
+/* ============================================================
+   TRANSPORT — one play button, one timeline. Audio buffer (when
+   present) is the master clock; otherwise a manual clock.
+============================================================ */
+const ICON_PLAY='&#9654;', ICON_PAUSE='&#10074;&#10074;';
+let scrubbing=false;
+
+function startPlayback(){
+  if(!state.midi&&!master.buffer&&!state.tracks.length) return;
+  synths.ensure();
+  actx.resume();
+  if(state.time>=state.duration) seekTo(0);
+  if(master.buffer) master.startSource(state.time);
+  state.playing=true;
+  $('btn-play').innerHTML=ICON_PAUSE;
+}
+function pausePlayback(){
+  if(master.buffer&&state.playing)
+    state.time=Math.min(actx.currentTime-master.t0, state.duration||Infinity);
+  master.stopSource();
+  state.playing=false;
+  $('btn-play').innerHTML=ICON_PLAY;
+}
+function togglePlay(){ state.playing?pausePlayback():startPlayback(); }
+function seekTo(t){
+  state.time=clamp(t,0,state.duration||0);
+  if(state.playing&&master.buffer) master.startSource(state.time);
+  syncPointers(midiTime());
+  resetAllVisuals();
+  updateTransportUI(true);
+}
+let lastShownSec=-1, lastScrubV=-1;
+function updateTransportUI(force=false){
+  const sec=Math.floor(state.time);
+  if(force||sec!==lastShownSec){
+    lastShownSec=sec;
+    $('time-label').textContent=`${fmtT(state.time)} / ${fmtT(state.duration)}`;
+  }
+  const sv=state.duration?Math.round(state.time/state.duration*1000):0;
+  if(!scrubbing&&(force||sv!==lastScrubV)){ lastScrubV=sv; $('scrub').value=sv; }
+}
+function dispatchNotes(){
+  const t=state.tMidi;
+  for(const r in state.roleNotes){
+    const arr=state.roleNotes[r];
+    let p=state.rolePtr[r];
+    while(p<arr.length&&arr[p].time<=t){ fireNote(r,arr[p]); p++; }
+    state.rolePtr[r]=p;
+  }
+}
+
+$('btn-play').addEventListener('click',togglePlay);
+$('btn-rew').addEventListener('click',()=>seekTo(0));
+$('scrub').addEventListener('pointerdown',()=>scrubbing=true);
+addEventListener('pointerup',()=>scrubbing=false);
+addEventListener('pointercancel',()=>scrubbing=false);
+let seekHold=0;
+$('scrub').addEventListener('input',e=>{
+  if(!state.duration) return;
+  const t=e.target.value/1000*state.duration;
+  if(state.playing&&master.buffer){
+    /* throttle full seeks while dragging: avoid AudioBufferSource churn */
+    const now=performance.now();
+    if(now-seekHold<150){ state.time=t; master.t0=actx.currentTime-t; updateTransportUI(true); return; }
+    seekHold=now;
+  }
+  seekTo(t);
+});
+$('scrub').addEventListener('change',e=>{ if(state.duration) seekTo(e.target.value/1000*state.duration); });
+$('btn-mute').addEventListener('click',toggleMute);
+function setMuted(m,persist=true){
+  synths.setMuted(m);
+  $('btn-mute').innerHTML=m?'&#128263;':'&#128266;';
+  $('btn-mute').classList.toggle('lit',m);
+  if(persist){ try{ localStorage.setItem('synv5.muted',m?'1':'0'); }catch(e){} }
+}
+function toggleMute(){ setMuted(!synths.muted); }
+
+/* offset nudge — positive: MIDI fires later vs audio */
+function setOffset(v){
+  params.midiOffsetMs=clamp(Math.round(v),-1000,1000);
+  $('off-input').value=params.midiOffsetMs;
+  syncPointers(midiTime());
+}
+$('off-minus').addEventListener('click',()=>setOffset(params.midiOffsetMs-10));
+$('off-plus' ).addEventListener('click',()=>setOffset(params.midiOffsetMs+10));
+$('off-input').addEventListener('change',e=>setOffset(parseFloat(e.target.value)||0));
+
+addEventListener('keydown',e=>{
+  const tag=e.target.tagName;
+  if(tag==='SELECT'||tag==='TEXTAREA'||(tag==='INPUT'&&e.target.type!=='range')) return;
+  if(e.code==='Space'){ e.preventDefault(); togglePlay(); }
+  else if(e.key==='m'||e.key==='M') toggleMute();
+  else if(e.key==='d'||e.key==='D') toggleHud();
+  else if(e.key==='o'||e.key==='O') $('file-input').click();
+});
+
+/* ============================================================
+   DEBUG HUD — live per-track MIDI event readout
+============================================================ */
+const hud=(()=>{
+  const linesEl=$('hud-lines');
+  const buf=[];
+  let dirty=false, acc=0;
+  const NOTE_NAMES=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+  const nn=m=>NOTE_NAMES[m%12]+(Math.floor(m/12)-1);
+  return {
+    log(role,n){
+      if(!$('hud').classList.contains('show')) return;
+      buf.push(`<span style="color:${ROLE_DOT[role]}">${state.time.toFixed(2).padStart(7)}  T${(n._trk??0)+1} ${role.padEnd(6)} ${nn(n.midi).padEnd(4)} v${n.velocity.toFixed(2)}</span>`);
+      if(buf.length>15) buf.shift();
+      dirty=true;
+    },
+    update(dt){
+      acc+=dt;
+      if(dirty&&acc>.12){ linesEl.innerHTML=buf.join('<br>'); dirty=false; acc=0; }
+    }
+  };
+})();
+function toggleHud(){
+  $('hud').classList.toggle('show');
+  $('btn-hud').classList.toggle('lit',$('hud').classList.contains('show'));
+}
+$('btn-hud').addEventListener('click',toggleHud);
+
+/* ============================================================
+   TEST-TONE MODE — built-in pattern, zero file wrangling:
+   4-on-floor kick · snare 2/4 · 8th hats · moving bassline ·
+   3-note chord progression (4-note every 4th bar) · dummy lyrics
+============================================================ */
+function loadTestTone(){
+  const BPM=124, spb=60/BPM, bar=spb*4, BARS=32;
+  const N=(midi,time,duration,velocity)=>({midi,time,duration,velocity});
+  const dr=[],bs=[],ch=[],vx=[];
+  const prog=[
+    {root:33,triad:[57,60,64],seventh:67},   /* Am */
+    {root:29,triad:[53,57,60],seventh:64},   /* F  */
+    {root:36,triad:[52,55,60],seventh:64},   /* C  */
+    {root:31,triad:[55,59,62],seventh:65},   /* G  */
+  ];
+  for(let b=0;b<BARS;b++){
+    const t0=b*bar, P=prog[b%4];
+    for(let beat=0;beat<4;beat++){
+      const tb=t0+beat*spb;
+      dr.push(N(36,tb,.1,beat===0?.97:.88));                      /* kick */
+      if(beat===1||beat===3) dr.push(N(38,tb,.1,.92));            /* snare */
+      dr.push(N(42,tb,.05,.62));                                  /* hats: 8ths */
+      dr.push(N(42,tb+spb/2,.05,.40));
+    }
+    /* bassline: 8ths walking root/fifth/octave, climbing every 4th bar */
+    const lift=(b%8===7)?12:0;
+    const pat=[0,0,12,0, 7,0,12+lift,7];
+    for(let i=0;i<8;i++){
+      bs.push(N(P.root+pat[i], t0+i*spb/2, .21, i%2?.72:.93));
+    }
+    /* chords: whole-bar triad; every 4th bar a 4-note voicing */
+    const voicing=(b%4===3)?[...prog[(b+1)%4].triad,prog[(b+1)%4].seventh]:P.triad;
+    for(const m of voicing) ch.push(N(m,t0+.01,bar*.96,.8));
+    /* vocal notes every 2 bars (pulse the placeholder) */
+    if(b%2===0) vx.push(N(64+(b%4)*2, t0+bar*.5, 1.2, .8));
+  }
+  const lyricsArr=[
+    'test tone mode','neon over black','the orb is breathing','golden lines in flight',
+    'magenta on the floor','white light ceiling','cyan heart beating','and the room sways',
+  ].map((s,i)=>({t:i*4*bar+.5, text:s}));
+
+  master.stopSource(); master.buffer=null; master.name='';
+  resetAllVisuals();
+  state.midi=null; state.fileName='TEST TONE';
+  state.midiDur=BARS*bar;
+  state.time=0; state.playing=false;
+  state.tracks=[
+    {idx:0,track:{notes:dr},name:'TEST drums', channel:9,program:-1,role:'drums', stats:trackStats(dr)},
+    {idx:1,track:{notes:bs},name:'TEST bass',  channel:0,program:38,role:'bass',  stats:trackStats(bs)},
+    {idx:2,track:{notes:ch},name:'TEST chords',channel:1,program:90,role:'chords',stats:trackStats(ch)},
+    {idx:3,track:{notes:vx},name:'TEST vocals',channel:2,program:53,role:'vocals',stats:trackStats(vx)},
+  ];
+  recomputeDuration();
+  rebuildRoleNotes();
+  buildTrackPanel();
+  lyric.setLines(lyricsArr);
+  $('lyric-label').textContent='test lines';
+  $('file-label').textContent='TEST TONE · built-in pattern';
+  $('hint-card').classList.add('gone');
+  $('transport').classList.add('on');
+  if(synths.muted) setMuted(false,false);      /* the pattern should be audible; not a preference change */
+  updateTransportUI(true);
+  toast('Test tone — judging the room with the built-in pattern');
+  startPlayback();
+}
+$('btn-test').addEventListener('click',loadTestTone);
+window.__loadTestTone = loadTestTone;
+
+/* ============================================================
+   TUNING PANEL — exactly the spec'd sliders
+============================================================ */
+const SLIDER_DEFS=[
+  {sect:'CEILING / SNARE'},
+  {key:'ceilIdle',   label:'Ceiling Idle',    min:0,   max:1,   step:.01},
+  {key:'snareFlash', label:'Snare Flash',     min:0,   max:2,   step:.01},
+  {key:'snareDecay', label:'Snare Decay',     min:.05, max:.8,  step:.01},
+  {sect:'KICK RINGS'},
+  {key:'ringSpeed',  label:'Ring Speed',      min:2,   max:14,  step:.1},
+  {key:'ringBright', label:'Ring Brightness', min:.1,  max:2,   step:.01},
+  {sect:'BASS ORB'},
+  {key:'orbSize',    label:'Orb Size Range',  min:0,   max:1.5, step:.01},
+  {key:'orbTrail',   label:'Orb Trail',       min:.2,  max:2.5, step:.05},
+  {sect:'WALL SCREENS'},
+  {key:'lineThick',  label:'Line Thickness',  min:.4,  max:2.5, step:.05},
+  {key:'scrollSpeed',label:'Scroll Speed',    min:.03, max:.6,  step:.01},
+  {sect:'LYRICS / POST'},
+  {key:'lyricSize',  label:'Lyric Size',      min:.5,  max:2,   step:.01},
+  {key:'bloom',      label:'Bloom',           min:0,   max:1.8, step:.01},
+  {key:'floorRefl',  label:'Floor Reflect',   min:0,   max:1,   step:.01,
+     apply:v=>floorMesh.material.uniforms.uRefl.value=v},
+];
+function buildTuning(){
+  const host=$('sliders');
+  for(const d of SLIDER_DEFS){
+    if(d.sect){ const s=document.createElement('div'); s.className='sect'; s.textContent=d.sect; host.append(s); continue; }
+    const row=document.createElement('div'); row.className='row';
+    const lab=document.createElement('label'); lab.textContent=d.label;
+    const inp=document.createElement('input');
+    inp.type='range'; inp.min=d.min; inp.max=d.max; inp.step=d.step; inp.value=params[d.key];
+    const val=document.createElement('span'); val.className='val'; val.textContent=(+params[d.key]).toFixed(2);
+    inp.addEventListener('input',()=>{
+      const v=parseFloat(inp.value);
+      params[d.key]=v;
+      val.textContent=v.toFixed(2);
+      if(d.apply)d.apply(v);
+    });
+    row.append(lab,inp,val);
+    host.append(row);
+  }
+}
+
+/* panel folding */
+for(const id of ['track','tune','lyric']){
+  $(id+'-head').addEventListener('click',e=>{
+    if(e.target.tagName==='TEXTAREA') return;
+    const body=$(id+'-body');
+    body.classList.toggle('folded');
+    $(id+'-head').querySelector('.fold').textContent=body.classList.contains('folded')?'+':'–';
+  });
+}
+
+/* ============================================================
+   MAIN LOOP
+============================================================ */
+let lastWall=performance.now()/1000, fpsAcc=0, fpsN=0, fpsT=0;
+function animate(){
+  requestAnimationFrame(animate);
+  frame(performance.now()/1000);
+}
+function frame(wall){
+  const dt=Math.min(Math.max(wall-lastWall,0),.1);
+  lastWall=wall;
+  U.time.value=wall;
+  grade.uniforms.uTime.value=wall;
+
+  const tMidiPrev=state.tMidi;
+  if(state.playing){
+    if(master.buffer&&actx.state==='running') state.time=actx.currentTime-master.t0;
+    else { state.time+=dt; if(master.buffer) master.t0=actx.currentTime-state.time; }
+    if(state.time>=state.duration){ state.time=state.duration; pausePlayback(); }
+    state.tMidi=midiTime();
+    /* hidden-tab catch-up: audio kept playing while rAF stalled — skip the
+       gap instead of replaying every missed note in one frame */
+    if(state.tMidi-tMidiPrev>0.5) syncPointers(state.tMidi);
+    else dispatchNotes();
+    updateTransportUI();
+  }else{
+    state.tMidi=midiTime();
+  }
+
+  /* anti-whiteout governor: dense passages compress all emissives */
+  state.energy*=Math.exp(-1.7*dt);
+  U.gain.value=clamp(1/(1+state.energy*.15),.5,1);
+  bloom.strength=params.bloom*(.60+.40*U.gain.value);
+
+  updateCamera(wall,dt);
+  ceiling.update(dt);
+  drums.update(dt);
+  orb.update(dt,wall);
+  walls.update(dt);
+  lyric.update(dt,state.time);
+  hud.update(dt);
+
+  updateReflection();
+  composer.render();
+
+  fpsAcc+=dt; fpsN++;
+  if((fpsT+=dt)>=.5){
+    state.fps=Math.round(fpsN/fpsAcc);
+    $('fps-label').textContent=state.fps+' fps';
+    fpsAcc=0; fpsN=0; fpsT=0;
+  }
+}
+
+/* ============================================================
+   BOOT
+============================================================ */
+buildTuning();
+try{ if(localStorage.getItem('synv5.muted')==='1'){ synths.setMuted(true);
+  $('btn-mute').innerHTML='&#128263;'; $('btn-mute').classList.add('lit'); } }catch(e){}
+addEventListener('pointerdown',()=>{ synths.ensure(); actx.resume(); },{once:true});
+window.__viz={state,params,bloom,grade,renderer,composer,camera,seekTo,togglePlay,
+  loadTestTone, walls, lyric, master, ceiling, actx,
+  step:(dt=1/60)=>frame(lastWall+dt)};
+window.__loadAudioFile = loadAudioFile;
+animate();
+</script>
+</body>
+</html>
